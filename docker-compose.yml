@@ -28,6 +28,41 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - eventpulse-net
+
+  redis:
+    image: redis:7
+    container_name: eventpulse-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - eventpulse-net
+
+  relay:
+    build: ./relay
+    container_name: eventpulse-relay
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/eventpulse
+      REDIS_URL: redis://redis:6379/0
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
     networks:
       - eventpulse-net
 
