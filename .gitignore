@@ -1,1 +1,11 @@
 .DS_Store
+__pycache__/
+scripts/chart.png
+docs/_backup_20260901/
+docs/review_1_material/
+docs/review_1_old/
+docs/review_2_material/
+docs/*.docx
+docs/*.pptx
+docs/build_review2_ppt.py
+docs/prep_guide.pdf

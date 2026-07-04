@@ -55,6 +55,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/eventpulse
       REDIS_URL: redis://redis:6379/0
+      POLL_INTERVAL_SECONDS: "0.05"
       PYTHONUNBUFFERED: "1"
     depends_on:
       db:
@@ -62,6 +63,42 @@ services:
       redis:
         condition: service_healthy
       api:
+        condition: service_healthy
+    networks:
+      - eventpulse-net
+
+  receiver_mock:
+    build: ./receiver_mock
+    container_name: eventpulse-receiver
+    environment:
+      SIGNING_SECRET: dev-secret-change-me
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - eventpulse-net
+
+  worker:
+    build: ./worker
+    container_name: eventpulse-worker
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/eventpulse
+      REDIS_URL: redis://redis:6379/0
+      RETRY_POLICY: ${RETRY_POLICY:-none}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-20}
+      SIGNING_SECRET: dev-secret-change-me
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      receiver_mock:
         condition: service_healthy
     networks:
       - eventpulse-net
