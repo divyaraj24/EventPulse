@@ -100,6 +100,40 @@ def compute_recovery_time(
     return None
 
 
+def compute_delivery_stats(rows) -> dict | None:
+    """Retries-per-request and rejection-rate summary -- only meaningful for
+    worker.py's delivery_log.csv rows (has "outcome"/"attempt"), not
+    load_generator.py's ingest-side rows. Returns None for the latter."""
+    if not rows or "outcome" not in rows[0]:
+        return None
+
+    attempts_per_event: dict[str, int] = defaultdict(int)
+    retries = 0
+    delivered = 0
+    dlq = 0
+    for row in rows:
+        event_id = row["event_id"]
+        attempts_per_event[event_id] = max(attempts_per_event[event_id], int(row["attempt"]))
+        if row["outcome"] == "retry":
+            retries += 1
+        elif row["outcome"] == "delivered":
+            delivered += 1
+        elif row["outcome"] == "dlq":
+            dlq += 1
+
+    total_events = len(attempts_per_event)
+    resolved = delivered + dlq
+    return {
+        "total_events": total_events,
+        "resolved": resolved,
+        "delivered": delivered,
+        "dlq": dlq,
+        "retries": retries,
+        "avg_attempts": sum(attempts_per_event.values()) / total_events if total_events else 0.0,
+        "rejection_rate": dlq / resolved if resolved else 0.0,
+    }
+
+
 def compute_latency_series(rows):
     timestamps = [datetime.fromisoformat(r["timestamp"]) for r in rows]
     start = min(timestamps)
@@ -155,9 +189,14 @@ def main():
     fig, (ax_goodput, ax_latency) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
     recovery_results = {}
+    delivery_stats = {}
     shaded_fault_window = False
 
     for label, rows in conditions:
+        stats = compute_delivery_stats(rows)
+        if stats is not None:
+            delivery_stats[label] = stats
+
         times, goodput, start = compute_goodput_per_bucket(rows, bucket_seconds=args.bucket_size)
         [line] = ax_goodput.plot(times, goodput, label=label, marker="o", markersize=3)
 
@@ -223,6 +262,17 @@ def main():
                 print(f"  {label}: baseline={baseline:.2f} ev/s -- did NOT recover within the observed window")
             else:
                 print(f"  {label}: baseline={baseline:.2f} ev/s -- recovery time = {recovery:.1f}s after fault cleared")
+
+    if delivery_stats:
+        print("\n[analyze] Retry/rejection summary:")
+        for label, s in delivery_stats.items():
+            unresolved = s["total_events"] - s["resolved"]
+            print(
+                f"  {label}: {s['total_events']} events, {s['retries']} retries "
+                f"(avg {s['avg_attempts']:.2f} attempts/event), "
+                f"rejection rate {s['rejection_rate']:.1%} ({s['dlq']}/{s['resolved']} resolved)"
+                + (f", {unresolved} still unresolved" if unresolved else "")
+            )
 
 
 if __name__ == "__main__":
