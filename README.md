@@ -1,6 +1,8 @@
 # EventPulse
 
 [![CI](https://github.com/divyaraj24/EventPulse/actions/workflows/ci.yml/badge.svg)](https://github.com/divyaraj24/EventPulse/actions/workflows/ci.yml)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](api/Dockerfile)
+[![Docker Compose v2](https://img.shields.io/badge/Docker%20Compose-v2-2496ED.svg)](docker-compose.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A reliable webhook delivery system with failure analytics. It's a durable, at-least-once delivery pipeline that gets deliberately subjected to controlled chaos, so we can measure exactly when automatic retry stops helping and starts sustaining the outage it was supposed to fix.
