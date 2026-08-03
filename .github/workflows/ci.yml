@@ -32,3 +32,8 @@ jobs:
 
       - name: Validate docker-compose.yml
         run: docker compose config --quiet
+
+      - name: Unit tests (retry policies)
+        run: |
+          pip install pytest
+          cd worker && python3 -m pytest -v
