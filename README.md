@@ -1,6 +1,5 @@
 # EventPulse
 
-[![CI](https://github.com/divyaraj24/EventPulse/actions/workflows/ci.yml/badge.svg)](https://github.com/divyaraj24/EventPulse/actions/workflows/ci.yml)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](api/Dockerfile)
 [![Docker Compose v2](https://img.shields.io/badge/Docker%20Compose-v2-2496ED.svg)](docker-compose.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
