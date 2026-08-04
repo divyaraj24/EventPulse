@@ -2,7 +2,7 @@
 # Runs one full experimental condition end to end: rebuild -> load
 # generator (+ optional chaos) in parallel -> wait for the worker to drain
 # its backlog -> extract the delivery log -> teardown -> chart. Output
-# files land in scripts/results/, prefixed with the label; rerunning a
+# files land in scripts/results/<label>/; rerunning a
 # label overwrites its files.
 #
 # Three fault modes:

@@ -1,9 +1,10 @@
 name: CI
 
+# Push/PR triggers are paused for now -- CircleCI covers the same
+# checks in the meantime. Restore the `push`/`pull_request` block
+# below to resume automatic runs here too.
 on:
-  push:
-    branches: [main, test]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   sanity-checks:
