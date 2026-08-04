@@ -1,6 +1,6 @@
 # EventPulse
 
-[![CircleCI](https://dl.circleci.com/status-badge/img/gh/divyaraj24/EventPulse/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/divyaraj24/EventPulse/tree/main)
+[![CircleCI](https://dl.circleci.com/status-badge/img/circleci/6uVYqMakkoyjmqM1huUNSW/FU7aux9tfv5qfgY62LR2PR/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/circleci/6uVYqMakkoyjmqM1huUNSW/FU7aux9tfv5qfgY62LR2PR/tree/main)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](api/Dockerfile)
 [![Docker Compose v2](https://img.shields.io/badge/Docker%20Compose-v2-2496ED.svg)](docker-compose.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
