@@ -51,17 +51,7 @@ All three implement the same two-method interface (`worker/retry_policies.py`), 
 
 ## Results
 
-**Headline finding, from the project report** (`docs/EventPulse_Review2_Draft.docx`). Same offered load (15 events/s, 120s) and the same fault (40s at concurrency ceiling 1 plus 300ms latency) across all three conditions; only the retry policy differs:
-
-| Condition | Recovery time after fault clears | Unresolved events (of 1800) |
-|---|---|---|
-| `none` | instant (never builds a backlog) | 0, but it discards 26% of events outright |
-| `naive` | doesn't recover within the observed window | 684 (38%) still circulating when the run ends |
-| `adaptive` | 6.0s | 0 |
-
-Extending the naive run to 300 seconds of continuous load doesn't show a slow recovery, it shows goodput holding flat around 3 events/s (against a 15 events/s baseline), with 67% of events still unresolved by the time the run stops. That's a chronic degraded equilibrium, not a slow drain. One thing worth noting: per-request latency stays low (0-50ms) the whole time. The receiver is being overwhelmed by retry volume, not slow processing, so watching latency alone would never have caught this.
-
-**Reproducible in this repository.** A harsher variant (`scripts/results/*_hardfault_*`, committed here), a 90-second fault with deliberately throttled recovery capacity, one run per policy:
+All numbers below come from `scripts/results/*_hardfault_*`, committed in this repository — clone it and the raw CSVs, timeline JSON, and chart are right there, nothing to take on faith. Same offered load and the same 90-second fault (deliberately throttled recovery capacity) across all three conditions; only the retry policy differs:
 
 ![Combined comparison chart](scripts/results/charts/combined_hardfault.png)
 
@@ -71,14 +61,13 @@ Extending the naive run to 300 seconds of continuous load doesn't show a slow re
 | `naive` | 815 (30%) | 423 (16%) | 3231 | **1420** |
 | `adaptive` | 1134 (42%) | 1566 (58%) | 366 | 0 |
 
-Naive is the only policy that doesn't even finish processing the offered load. Its retry storm piles messages up faster than the throttled receiver can drain them. Both `none` and `adaptive` fully resolve every event, and adaptive does it while still retrying productively wherever it's actually safe to.
+Naive is the only policy that doesn't even finish processing the offered load. Its retry storm piles messages up faster than the throttled receiver can drain them, leaving over half of everything sent stuck mid-retry when the run ends. Both `none` and `adaptive` fully resolve every event, and adaptive does it while still retrying productively wherever it's actually safe to.
 
-### Limitations (from the project report)
+### Limitations
 
 - Results so far are single runs per condition, so run-to-run variance isn't quantified yet.
 - Only one receiver endpoint is exercised. Adaptive tracks state per endpoint, but its behavior across many endpoints of differing health hasn't been tested.
-- The fault tested is a capacity ceiling combined with injected latency. Other shapes, like high random rejection rates or partial outages, aren't covered by the benchmark yet.
-- "Doesn't recover" is bounded by the longest window tested (about 360 seconds post-fault). That's a statement about the trend staying flat within that window, not proof it would never recover.
+- The fault tested here is a capacity ceiling combined with injected latency. Other shapes, like high random rejection rates or partial outages, aren't covered by the benchmark yet.
 
 ## Running it
 
@@ -102,7 +91,7 @@ Python 3.12, FastAPI, SQLAlchemy 2.0, PostgreSQL 18, Redis 7 (Streams), httpx (a
 
 ## References
 
-The full literature review and reference list live in `docs/EventPulse_Review2_Draft.docx`. Source PDFs for the three papers used most directly are in `docs/references/`. The adaptive policy is a direct, simplified port of RetryGuard's productive-retry controller (Tavori, Bremler-Barr, Levy & Lavi, 2025).
+Source PDFs for the papers used most directly are in `docs/references/`. The adaptive policy is a direct, simplified port of RetryGuard's productive-retry controller (Tavori, Bremler-Barr, Levy & Lavi, 2025).
 
 ## License
 
