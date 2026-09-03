@@ -8,11 +8,4 @@ scripts/chart.png
 # CSVs/JSON grow unbounded as more tests are run. Charts stay trackable.
 scripts/results/**/*.csv
 scripts/results/**/*.json
-docs/_backup_20260901/
-docs/review_1_material/
-docs/review_1_old/
-docs/review_2_material/
-docs/*.docx
-docs/*.pptx
-docs/build_review2_ppt.py
-docs/prep_guide.pdf
+docs/private/
