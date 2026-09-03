@@ -51,7 +51,18 @@ All three implement the same two-method interface (`worker/retry_policies.py`), 
 
 ## Results
 
-All numbers below come from `scripts/results/*_hardfault_*`, committed in this repository — clone it and the raw CSVs, timeline JSON, and chart are right there, nothing to take on faith. Same offered load and the same 90-second fault (deliberately throttled recovery capacity) across all three conditions; only the retry policy differs:
+All numbers below are reproducible, not pre-committed data to take on faith. Clone the repo and run each condition yourself:
+
+```bash
+cd scripts
+for policy in none naive adaptive; do
+  ./run_experiment.sh ${policy}_hardfault --policy "$policy" --rate 15 --duration 180 \
+    -- --steady 15 --fault 90 --recovery 60 --max-concurrency 1 --latency-ms 300 \
+       --recovered-max-concurrency 2
+done
+```
+
+Same offered load and the same 90-second fault (deliberately throttled recovery capacity) across all three conditions; only the retry policy differs:
 
 ![Combined comparison chart](scripts/results/charts/combined_hardfault.png)
 
