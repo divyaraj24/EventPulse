@@ -2,6 +2,7 @@
 __pycache__/
 .pytest_cache/
 .vscode/
+.claude/
 scripts/chart.png
 # Only commit chart images from experiment runs, not the raw data --
 # CSVs/JSON grow unbounded as more tests are run. Charts stay trackable.
