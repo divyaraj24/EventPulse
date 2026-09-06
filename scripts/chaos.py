@@ -1,29 +1,30 @@
 """
-Drives the mock receiver through steady -> fault -> recovery, and writes
-chaos_timeline.json with the trigger/clear timestamps so analyze.py can
-shade the fault window and measure recovery time precisely.
+Thin CLI wrapper around the canonical fault-injection implementation in
+harness/service/chaos.py. There is only one real implementation; this
+file exists only to parse argv for manual/CLI use via run_experiment.sh.
 
 Run in parallel with load_generator.py (its --duration should cover
---steady + --fault + --recovery so it's still sending when the fault clears).
+--steady + --fault + --recovery so it's still sending when the fault
+clears).
 
 Usage:
     python chaos.py --steady 10 --fault 20 --recovery 20 --max-concurrency 3
 """
 import argparse
-import json
-import time
-from datetime import datetime, timezone
+import asyncio
+import importlib.util
+from pathlib import Path
 
-import httpx
-
-
-def call_admin(client: httpx.Client, receiver_url: str, path: str, payload: dict | None = None):
-    if payload is None:
-        response = client.post(f"{receiver_url}{path}")
-    else:
-        response = client.post(f"{receiver_url}{path}", json=payload)
-    response.raise_for_status()
-    return response.json()
+# Loaded via importlib with an explicit unique module name, not a plain
+# sys.path import -- this file and the canonical one share the literal
+# filename "chaos.py", which would otherwise collide in sys.modules
+# (see docs/private/bugs_and_lessons.md #9, same issue load_generator.py
+# hit first).
+_canonical_path = Path(__file__).resolve().parent.parent / "harness" / "service" / "chaos.py"
+_spec = importlib.util.spec_from_file_location("_harness_chaos", _canonical_path)
+_canonical = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_canonical)
+run = _canonical.run
 
 
 def main():
@@ -47,44 +48,18 @@ def main():
     parser.add_argument("--timeline-output", default="chaos_timeline.json")
     args = parser.parse_args()
 
-    timeline = {"params": vars(args)}
-
-    with httpx.Client(timeout=5.0) as client:
-        call_admin(client, args.receiver_url, "/admin/reset")
-        timeline["steady_start"] = datetime.now(timezone.utc).isoformat()
-        print(f"[chaos] steady state for {args.steady}s")
-        time.sleep(args.steady)
-
-        timeline["fault_start"] = datetime.now(timezone.utc).isoformat()
-        call_admin(client, args.receiver_url, "/admin/chaos", {
-            "reject_rate": args.reject_rate,
-            "latency_ms": args.latency_ms,
-            "max_concurrency": args.max_concurrency,
-        })
-        print(f"[chaos] FAULT TRIGGERED -- max_concurrency={args.max_concurrency}, "
-              f"reject_rate={args.reject_rate}, latency_ms={args.latency_ms} -- holding for {args.fault}s")
-        time.sleep(args.fault)
-
-        timeline["fault_end"] = datetime.now(timezone.utc).isoformat()
-        # Not a full /admin/reset -- snapping to unconstrained capacity would
-        # let the whole backlog drain in one burst, hiding the difference
-        # between retry policies.
-        call_admin(client, args.receiver_url, "/admin/chaos", {
-            "reject_rate": 0.0,
-            "latency_ms": args.recovered_latency_ms,
-            "max_concurrency": args.recovered_max_concurrency,
-        })
-        print(f"[chaos] fault cleared -- recovered capacity: max_concurrency={args.recovered_max_concurrency}, "
-              f"latency_ms={args.recovered_latency_ms} -- observing recovery for {args.recovery}s")
-        time.sleep(args.recovery)
-
-        timeline["observation_end"] = datetime.now(timezone.utc).isoformat()
-        # Deliberately not resetting here either -- whatever calls this
-        # script tears the stack down afterward anyway.
-
-    with open(args.timeline_output, "w") as f:
-        json.dump(timeline, f, indent=2)
-    print(f"[chaos] wrote timeline to {args.timeline_output}")
+    asyncio.run(run(
+        receiver_url=args.receiver_url,
+        steady=args.steady,
+        fault=args.fault,
+        recovery=args.recovery,
+        max_concurrency=args.max_concurrency,
+        reject_rate=args.reject_rate,
+        latency_ms=args.latency_ms,
+        recovered_max_concurrency=args.recovered_max_concurrency,
+        recovered_latency_ms=args.recovered_latency_ms,
+        timeline_output=args.timeline_output,
+    ))
 
 
 if __name__ == "__main__":

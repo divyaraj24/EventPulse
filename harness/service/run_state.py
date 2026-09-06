@@ -25,6 +25,7 @@ class TestRun:
     endpoint_id: str
     started_at: datetime
     progress: dict = field(default_factory=lambda: {"events_sent": 0, "events_total": 0})
+    chaos_phase: Optional[str] = None
     error: Optional[str] = None
     result_dir: Optional[Path] = None
 

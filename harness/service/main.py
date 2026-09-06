@@ -3,14 +3,16 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
+import chaos as chaos_module
 import docker_control
 import load_generator
-from models import TestStartRequest, TestStartResponse, TestStatusResponse
+from models import ChaosConfig, TestStartRequest, TestStartResponse, TestStatusResponse
 from run_state import RunRegistry, RunStatus, TestRun
 
 RESULTS_DIR = Path(os.getenv("HARNESS_RESULTS_DIR", "/app/results"))
@@ -42,23 +44,30 @@ async def wait_for_drain(timeout_seconds: float) -> None:
         await r.aclose()
 
 
-async def run_analyze(label: str, delivery_csv: Path, chart_png: Path) -> None:
-    proc = await asyncio.create_subprocess_exec(
+async def run_analyze(
+    label: str, delivery_csv: Path, chart_png: Path, timeline_json: Optional[Path] = None,
+) -> None:
+    cmd = [
         "python3", str(SCRIPTS_DIR / "analyze.py"),
         "--file", f"{label}:{delivery_csv}",
         "--output", str(chart_png),
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+    ]
+    if timeline_json is not None:
+        cmd += ["--timeline", f"{label}:{timeline_json}"]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
     )
     out, _ = await proc.communicate()
     if proc.returncode != 0:
         raise RuntimeError(f"analyze.py failed:\n{out.decode()}")
 
 
-async def execute_run(run: TestRun) -> None:
+async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
     run_dir = RESULTS_DIR / run.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     ingest_csv = run_dir / "ingest.csv"
     delivery_csv = run_dir / "delivery.csv"
+    timeline_json = run_dir / "timeline.json"
     chart_png = run_dir / "chart.png"
 
     try:
@@ -70,7 +79,10 @@ async def execute_run(run: TestRun) -> None:
         def on_progress(sent: int, total: int) -> None:
             run.progress = {"events_sent": sent, "events_total": total}
 
-        await load_generator.run(
+        def on_phase_change(phase: str) -> None:
+            run.chaos_phase = phase
+
+        load_gen_task = load_generator.run(
             rate=run.rate,
             duration=run.duration,
             api_url=API_URL,
@@ -80,6 +92,24 @@ async def execute_run(run: TestRun) -> None:
             on_progress=on_progress,
         )
 
+        if chaos_config.enabled:
+            chaos_task = chaos_module.run(
+                receiver_url="http://receiver_mock:9000",
+                steady=chaos_config.steady,
+                fault=chaos_config.fault,
+                recovery=chaos_config.recovery,
+                max_concurrency=chaos_config.max_concurrency,
+                reject_rate=chaos_config.reject_rate,
+                latency_ms=chaos_config.latency_ms,
+                recovered_max_concurrency=chaos_config.recovered_max_concurrency,
+                recovered_latency_ms=chaos_config.recovered_latency_ms,
+                timeline_output=str(timeline_json),
+                on_phase_change=on_phase_change,
+            )
+            await asyncio.gather(load_gen_task, chaos_task)
+        else:
+            await load_gen_task
+
         run.status = RunStatus.DRAINING
         await wait_for_drain(DRAIN_TIMEOUT_SECONDS)
 
@@ -88,7 +118,10 @@ async def execute_run(run: TestRun) -> None:
         await docker_control.extract_delivery_log(str(delivery_csv))
         await docker_control.teardown_core()
 
-        await run_analyze(run.label, delivery_csv, chart_png)
+        await run_analyze(
+            run.label, delivery_csv, chart_png,
+            timeline_json=timeline_json if chaos_config.enabled else None,
+        )
 
         run.status = RunStatus.DONE
         run.result_dir = run_dir
@@ -123,14 +156,14 @@ async def start_test(req: TestStartRequest):
             "detail": "A test run is already in progress",
             "current_run_id": current.run_id if current else None,
         })
-    asyncio.create_task(execute_run(run))
+    asyncio.create_task(execute_run(run, req.chaos))
     return TestStartResponse(run_id=run.run_id, status=run.status.value)
 
 
 def _to_status_response(run: TestRun) -> TestStatusResponse:
     return TestStatusResponse(
         run_id=run.run_id, status=run.status.value, label=run.label,
-        progress=run.progress, error=run.error,
+        progress=run.progress, chaos_phase=run.chaos_phase, error=run.error,
     )
 
 

@@ -3,12 +3,25 @@ from typing import Optional
 from pydantic import BaseModel
 
 
+class ChaosConfig(BaseModel):
+    enabled: bool = False
+    steady: float = 15.0
+    fault: float = 40.0
+    recovery: float = 60.0
+    max_concurrency: int = 3
+    reject_rate: float = 0.0
+    latency_ms: int = 0
+    recovered_max_concurrency: int = 5
+    recovered_latency_ms: int = 200
+
+
 class TestStartRequest(BaseModel):
     label: str
     rate: float
     duration: float
     policy: str = "none"
     endpoint_id: str = "test1"
+    chaos: ChaosConfig = ChaosConfig()
 
 
 class TestStartResponse(BaseModel):
@@ -21,4 +34,5 @@ class TestStatusResponse(BaseModel):
     status: str
     label: str
     progress: dict
+    chaos_phase: Optional[str] = None
     error: Optional[str] = None
