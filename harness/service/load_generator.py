@@ -1,10 +1,10 @@
 """
 Canonical, harness-callable version of load generation -- an async
 function the harness service awaits directly (via asyncio.gather
-alongside chaos.py, once that's wired in), not a subprocess. See
-scripts/load_generator.py for the standalone CLI version kept for manual
-use; the two may drift slightly, which is an accepted tradeoff (see
-PROJECT_HISTORY.md) rather than a shared-package refactor.
+alongside chaos.py, once that's wired in), not a subprocess.
+scripts/load_generator.py is a thin CLI wrapper importing this module
+directly (not a separate implementation), so there is only one real
+load-generation code path to reason about.
 """
 import asyncio
 import csv
@@ -68,17 +68,27 @@ async def run(
         # httpx's default connection cap (100) becomes an invisible
         # client-side bottleneck at higher offered rates.
         limits = httpx.Limits(max_connections=300, max_keepalive_connections=100)
-        # Draining roughly once per second of pacing bounds how many
-        # requests can be alive at once -- without this, asyncio.create_task
-        # never blocks, so at a high rate the scheduling loop races ahead of
-        # completions and thousands of tasks pile up in memory before the
-        # single gather() at the end. Past httpx's connection cap those just
-        # queue inside the process, making the load generator's own host
-        # the real bottleneck instead of whatever's actually being tested.
-        drain_every = max(1, int(rate))
+        # Bound concurrent in-flight sends via a semaphore -- the same
+        # pattern worker.py uses for delivery concurrency -- rather than
+        # periodically blocking the whole scheduling loop on a full batch.
+        # A batch-drain stalls real wall-clock time whenever one batch is
+        # slow, and since pacing is anchored to absolute target times
+        # (start + seq*interval), the loop then fires a catch-up burst
+        # right after the drain to make up the lost ground. A semaphore
+        # lets sends flow continuously -- each task blocks only on its own
+        # acquire, never the scheduling loop -- so pacing stays smooth even
+        # when the receiver is genuinely slow, not just drift-free in
+        # aggregate.
+        concurrency_limit = max(1, int(rate))
+        semaphore = asyncio.Semaphore(concurrency_limit)
+
         async with httpx.AsyncClient(limits=limits) as client:
+            async def send_bounded(seq: int):
+                async with semaphore:
+                    await send_event(client, api_url, endpoint_id, endpoint_url, writer, f, seq)
+
             start = time.monotonic()
-            tasks = []
+            tasks: list[asyncio.Task] = []
 
             for seq in range(total_events):
                 # Schedule against an absolute target time rather than
@@ -88,15 +98,13 @@ async def run(
                 if target_time > now:
                     await asyncio.sleep(target_time - now)
 
-                tasks.append(asyncio.create_task(
-                    send_event(client, api_url, endpoint_id, endpoint_url, writer, f, seq)
-                ))
+                tasks.append(asyncio.create_task(send_bounded(seq)))
                 if on_progress and (seq + 1) % 10 == 0:
                     on_progress(seq + 1, total_events)
-
-                if len(tasks) >= drain_every:
-                    await asyncio.gather(*tasks)
-                    tasks.clear()
+                    # Drop references to already-finished tasks so the list
+                    # itself doesn't grow unboundedly over a long run --
+                    # completed tasks have already written+flushed their row.
+                    tasks = [t for t in tasks if not t.done()]
 
             await asyncio.gather(*tasks)
             if on_progress:

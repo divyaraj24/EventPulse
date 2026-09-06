@@ -1,7 +1,10 @@
 """
-Sends events to the ingest API at a steady, controlled rate, so "offered
-event rate" is a reproducible independent variable rather than just
-hammering the API as fast as possible.
+Thin CLI wrapper around the canonical load-generation implementation in
+harness/service/load_generator.py. There is only one real implementation
+of load generation in this project; this file exists only to parse
+argv for manual/CLI use via run_experiment.sh, so the CLI path and the
+harness API path can never silently diverge in behavior (they're the
+same code).
 
 Usage:
     python load_generator.py --rate 20 --duration 60 --output results_naive.csv
@@ -11,89 +14,19 @@ host-exposed port (localhost:8000).
 """
 import argparse
 import asyncio
-import csv
-import time
-from datetime import datetime, timezone
-from typing import Any
+import importlib.util
+from pathlib import Path
 
-import httpx
-
-
-async def send_event(
-    client: httpx.AsyncClient,
-    api_url: str,
-    endpoint_id: str,
-    endpoint_url: str,
-    writer: Any,  # csv._writer -- an internal type with no clean public name
-    f: Any,
-    seq: int,
-):
-    payload = {
-        "event_type": "payment.success",
-        "endpoint_id": endpoint_id,
-        "endpoint_url": endpoint_url,
-        "payload": {"seq": seq},
-    }
-
-    send_started = time.monotonic()
-    timestamp = datetime.now(timezone.utc).isoformat()
-
-    try:
-        response = await client.post(f"{api_url}/events", json=payload, timeout=5.0)
-        latency_ms = (time.monotonic() - send_started) * 1000
-        result = "ok" if response.status_code == 202 else "rejected"
-        writer.writerow([timestamp, seq, response.status_code, f"{latency_ms:.2f}", result])
-    except httpx.RequestError as e:
-        latency_ms = (time.monotonic() - send_started) * 1000
-        writer.writerow([timestamp, seq, "ERR", f"{latency_ms:.2f}", str(e)])
-    # Flush every row -- a killed run would otherwise lose all
-    # buffered-but-unwritten rows, not just the tail.
-    f.flush()
-
-
-async def run(rate: float, duration: float, api_url: str, endpoint_id: str, endpoint_url: str, output_path: str):
-    interval = 1.0 / rate
-    total_events = int(rate * duration)
-
-    with open(output_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["timestamp", "seq", "status_code", "latency_ms", "result"])
-        f.flush()
-
-        # httpx's default connection cap (100) becomes an invisible
-        # client-side bottleneck at higher offered rates.
-        limits = httpx.Limits(max_connections=300, max_keepalive_connections=100)
-        # Draining roughly once per second of pacing bounds how many
-        # requests can be alive at once -- without this, asyncio.create_task
-        # never blocks, so at a high rate the scheduling loop races ahead of
-        # completions and thousands of tasks pile up in memory before the
-        # single gather() at the end. Past httpx's connection cap those just
-        # queue inside the process, making the load generator's own host
-        # the real bottleneck instead of whatever's actually being tested.
-        drain_every = max(1, int(rate))
-        async with httpx.AsyncClient(limits=limits) as client:
-            start = time.monotonic()
-            tasks = []
-
-            for seq in range(total_events):
-                # Schedule against an absolute target time rather than
-                # sleeping `interval` each loop, so pacing doesn't drift late.
-                target_time = start + seq * interval
-                now = time.monotonic()
-                if target_time > now:
-                    await asyncio.sleep(target_time - now)
-
-                tasks.append(asyncio.create_task(
-                    send_event(client, api_url, endpoint_id, endpoint_url, writer, f, seq)
-                ))
-
-                if len(tasks) >= drain_every:
-                    await asyncio.gather(*tasks)
-                    tasks.clear()
-
-            await asyncio.gather(*tasks)
-
-    print(f"[load_generator] sent {total_events} events over {duration}s (target rate {rate}/s) -> {output_path}")
+# Loaded via importlib with an explicit unique module name, not a plain
+# sys.path import -- this file and the canonical one share the literal
+# filename "load_generator.py", and a plain `import load_generator` here
+# would collide with Python's own module cache (a circular self-import)
+# since both would register under the same module name.
+_canonical_path = Path(__file__).resolve().parent.parent / "harness" / "service" / "load_generator.py"
+_spec = importlib.util.spec_from_file_location("_harness_load_generator", _canonical_path)
+_canonical = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_canonical)
+run = _canonical.run
 
 
 def main():
