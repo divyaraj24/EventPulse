@@ -68,6 +68,14 @@ async def run(
         # httpx's default connection cap (100) becomes an invisible
         # client-side bottleneck at higher offered rates.
         limits = httpx.Limits(max_connections=300, max_keepalive_connections=100)
+        # Draining roughly once per second of pacing bounds how many
+        # requests can be alive at once -- without this, asyncio.create_task
+        # never blocks, so at a high rate the scheduling loop races ahead of
+        # completions and thousands of tasks pile up in memory before the
+        # single gather() at the end. Past httpx's connection cap those just
+        # queue inside the process, making the load generator's own host
+        # the real bottleneck instead of whatever's actually being tested.
+        drain_every = max(1, int(rate))
         async with httpx.AsyncClient(limits=limits) as client:
             start = time.monotonic()
             tasks = []
@@ -85,6 +93,10 @@ async def run(
                 ))
                 if on_progress and (seq + 1) % 10 == 0:
                     on_progress(seq + 1, total_events)
+
+                if len(tasks) >= drain_every:
+                    await asyncio.gather(*tasks)
+                    tasks.clear()
 
             await asyncio.gather(*tasks)
             if on_progress:

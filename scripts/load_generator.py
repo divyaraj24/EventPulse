@@ -25,6 +25,7 @@ async def send_event(
     endpoint_id: str,
     endpoint_url: str,
     writer: Any,  # csv._writer -- an internal type with no clean public name
+    f: Any,
     seq: int,
 ):
     payload = {
@@ -45,6 +46,9 @@ async def send_event(
     except httpx.RequestError as e:
         latency_ms = (time.monotonic() - send_started) * 1000
         writer.writerow([timestamp, seq, "ERR", f"{latency_ms:.2f}", str(e)])
+    # Flush every row -- a killed run would otherwise lose all
+    # buffered-but-unwritten rows, not just the tail.
+    f.flush()
 
 
 async def run(rate: float, duration: float, api_url: str, endpoint_id: str, endpoint_url: str, output_path: str):
@@ -54,10 +58,19 @@ async def run(rate: float, duration: float, api_url: str, endpoint_id: str, endp
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["timestamp", "seq", "status_code", "latency_ms", "result"])
+        f.flush()
 
         # httpx's default connection cap (100) becomes an invisible
         # client-side bottleneck at higher offered rates.
         limits = httpx.Limits(max_connections=300, max_keepalive_connections=100)
+        # Draining roughly once per second of pacing bounds how many
+        # requests can be alive at once -- without this, asyncio.create_task
+        # never blocks, so at a high rate the scheduling loop races ahead of
+        # completions and thousands of tasks pile up in memory before the
+        # single gather() at the end. Past httpx's connection cap those just
+        # queue inside the process, making the load generator's own host
+        # the real bottleneck instead of whatever's actually being tested.
+        drain_every = max(1, int(rate))
         async with httpx.AsyncClient(limits=limits) as client:
             start = time.monotonic()
             tasks = []
@@ -71,8 +84,12 @@ async def run(rate: float, duration: float, api_url: str, endpoint_id: str, endp
                     await asyncio.sleep(target_time - now)
 
                 tasks.append(asyncio.create_task(
-                    send_event(client, api_url, endpoint_id, endpoint_url, writer, seq)
+                    send_event(client, api_url, endpoint_id, endpoint_url, writer, f, seq)
                 ))
+
+                if len(tasks) >= drain_every:
+                    await asyncio.gather(*tasks)
+                    tasks.clear()
 
             await asyncio.gather(*tasks)
 
