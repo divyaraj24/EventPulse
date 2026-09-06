@@ -34,6 +34,12 @@ else
   exit 1
 fi
 
+# receiver_mock lives in docker-compose.harness.yml now -- it's part of
+# the test harness, persistent across runs, not the down -v/up cycle
+# every experiment does to the core services below.
+CORE_COMPOSE=("${DOCKER_COMPOSE[@]}" -f docker-compose.core.yml)
+HARNESS_COMPOSE=("${DOCKER_COMPOSE[@]}" -f docker-compose.harness.yml)
+
 if [ -z "$1" ] || [[ "$1" == --* ]]; then
   echo "Usage: ./run_experiment.sh <label> [--rate N] [--duration N] [--no-chaos] [--policy P] [--repeats N] [-- chaos.py args...]"
   exit 1
@@ -106,8 +112,8 @@ run_once() {
 
   echo "=== [$run_label] rebuilding containers (policy=$POLICY) ==="
   cd "$PROJECT_ROOT"
-  "${DOCKER_COMPOSE[@]}" down -v
-  RETRY_POLICY="$POLICY" "${DOCKER_COMPOSE[@]}" up --build -d --wait
+  "${CORE_COMPOSE[@]}" down -v
+  RETRY_POLICY="$POLICY" "${CORE_COMPOSE[@]}" up --build -d --wait
   sleep 3
 
   # Samples Postgres's active connection count once a second for the whole
@@ -190,11 +196,11 @@ PY
   echo "=== [$run_label] extracting worker delivery log ==="
   kill "$pg_monitor_pid" 2>/dev/null || true
   wait "$pg_monitor_pid" 2>/dev/null || true
-  "${DOCKER_COMPOSE[@]}" stop worker
+  "${CORE_COMPOSE[@]}" stop worker
   docker cp eventpulse-worker:/app/delivery_log.csv "$delivery_csv"
 
   echo "=== [$run_label] tearing down ==="
-  "${DOCKER_COMPOSE[@]}" down -v
+  "${CORE_COMPOSE[@]}" down -v
 
   echo "=== [$run_label] generating chart ==="
   cd "$SCRIPT_DIR"
@@ -210,6 +216,11 @@ PY
   echo "  peak Postgres active connections during this run: ${peak_connections:-unknown} (server max_connections is typically 100)"
   ls -la "$run_dir"
 }
+
+echo "=== ensuring harness stack (receiver_mock) is up ==="
+cd "$PROJECT_ROOT"
+"${HARNESS_COMPOSE[@]}" up -d --wait
+cd "$SCRIPT_DIR"
 
 if [ "$REPEATS" -le 1 ]; then
   run_once "$LABEL"

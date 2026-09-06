@@ -1,0 +1,22 @@
+name: eventpulse-harness
+
+services:
+  receiver_mock:
+    build: ./harness/receiver_mock
+    container_name: eventpulse-receiver
+    environment:
+      SIGNING_SECRET: dev-secret-change-me
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - eventpulse-net
+
+networks:
+  eventpulse-net:
+    name: eventpulse-net
