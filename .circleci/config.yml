@@ -21,7 +21,13 @@ jobs:
               | xargs -0 -n1 bash -n
       - run:
           name: Shellcheck
-          command: shellcheck scripts/*.sh
+          command: |
+            FILES=$(find . -name "*.sh" -not -path "./.venv/*")
+            if [ -n "$FILES" ]; then
+              shellcheck $FILES
+            else
+              echo "No shell scripts in the repo -- nothing to check."
+            fi
       - run:
           name: Unit tests (retry policies)
           command: |
