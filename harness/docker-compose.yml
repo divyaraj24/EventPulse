@@ -2,7 +2,7 @@ name: eventpulse-harness
 
 services:
   receiver_mock:
-    build: ./harness/receiver_mock
+    build: ./receiver_mock
     container_name: eventpulse-receiver
     environment:
       SIGNING_SECRET: dev-secret-change-me

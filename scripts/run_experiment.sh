@@ -38,7 +38,7 @@ fi
 # the test harness, persistent across runs, not the down -v/up cycle
 # every experiment does to the core services below.
 CORE_COMPOSE=("${DOCKER_COMPOSE[@]}" -f docker-compose.core.yml)
-HARNESS_COMPOSE=("${DOCKER_COMPOSE[@]}" -f docker-compose.harness.yml)
+HARNESS_COMPOSE=("${DOCKER_COMPOSE[@]}" -f harness/docker-compose.yml)
 
 if [ -z "$1" ] || [[ "$1" == --* ]]; then
   echo "Usage: ./run_experiment.sh <label> [--rate N] [--duration N] [--no-chaos] [--policy P] [--repeats N] [-- chaos.py args...]"
