@@ -17,6 +17,32 @@ services:
     networks:
       - eventpulse-net
 
+  # Docker-outside-of-Docker: shells out to `docker compose` against the
+  # host daemon to manage the core product's lifecycle (see
+  # service/docker_control.py). The repo is bind-mounted at the SAME
+  # absolute path inside this container as on the host, since compose
+  # build contexts and `docker cp` targets are resolved by the host
+  # daemon and must be host-valid paths.
+  harness-service:
+    build: ./service
+    container_name: eventpulse-harness-service
+    environment:
+      PROJECT_DIR: ${PWD}
+      CORE_COMPOSE_FILE: docker-compose.core.yml
+      SCRIPTS_DIR: ${PWD}/scripts
+      REDIS_URL: redis://redis:6379/0
+      API_URL: http://api:8000
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PWD}:${PWD}
+    networks:
+      - eventpulse-net
+    depends_on:
+      receiver_mock:
+        condition: service_healthy
+
 networks:
   eventpulse-net:
     name: eventpulse-net
