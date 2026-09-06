@@ -5,12 +5,9 @@
 # files land in scripts/results/<label>/; rerunning a
 # label overwrites its files.
 #
-# Three fault modes:
+# Two fault modes:
 #   default (chaos.py)  -- admin endpoint on receiver_mock switches on
 #                           synthetic errors/latency/capacity on a schedule
-#   --surge-rate N       -- receiver_mock's capacity is set ONCE and left
-#                           fixed; the fault is a real rate surge from
-#                           load_generator.py exceeding that fixed capacity
 #   --no-chaos            -- pure volume test, no fault at all
 #
 # --repeats N runs the whole condition N times, suffixing the label with
@@ -19,12 +16,12 @@
 #
 # Usage:
 #   ./run_experiment.sh <label> [--rate N] [--duration N] [--no-chaos] [--policy P] [--repeats N] [-- chaos.py args...]
-#   ./run_experiment.sh <label> --surge-rate N [--rate N] [--steady N] [--surge-duration N] [--recovery N] [--capacity N] [--poisson] [--policy P] [--repeats N]
 #
 # Examples:
 #   ./run_experiment.sh none_maxconcurrency -- --max-concurrency 3
 #   ./run_experiment.sh concurrent_volume --rate 150 --duration 60 --no-chaos
-#   ./run_experiment.sh naive_surge --policy naive --rate 10 --surge-rate 30 --capacity 5 --poisson --repeats 3
+#   ./run_experiment.sh naive_hardfault --policy naive --rate 15 --duration 180 --repeats 3 \
+#     -- --steady 15 --fault 90 --recovery 60 --max-concurrency 1 --latency-ms 300 --recovered-max-concurrency 2
 
 set -e
 
@@ -38,7 +35,7 @@ else
 fi
 
 if [ -z "$1" ] || [[ "$1" == --* ]]; then
-  echo "Usage: ./run_experiment.sh <label> [--rate N] [--duration N] [--no-chaos] [--policy P] [--repeats N] [--surge-rate N ...] [-- chaos.py args...]"
+  echo "Usage: ./run_experiment.sh <label> [--rate N] [--duration N] [--no-chaos] [--policy P] [--repeats N] [-- chaos.py args...]"
   exit 1
 fi
 
@@ -50,13 +47,6 @@ DURATION=50
 NO_CHAOS=false
 POLICY="none"
 REPEATS=1
-SURGE_RATE=""
-CAPACITY=5
-SERVICE_LATENCY_MS=50
-POISSON=false
-STEADY=15
-SURGE_DURATION=40
-RECOVERY=90
 CHAOS_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -66,13 +56,6 @@ while [[ $# -gt 0 ]]; do
     --no-chaos) NO_CHAOS=true; shift ;;
     --policy) POLICY="$2"; shift 2 ;;
     --repeats) REPEATS="$2"; shift 2 ;;
-    --surge-rate) SURGE_RATE="$2"; shift 2 ;;
-    --capacity) CAPACITY="$2"; shift 2 ;;
-    --service-latency-ms) SERVICE_LATENCY_MS="$2"; shift 2 ;;
-    --poisson) POISSON=true; shift ;;
-    --steady) STEADY="$2"; shift 2 ;;
-    --surge-duration) SURGE_DURATION="$2"; shift 2 ;;
-    --recovery) RECOVERY="$2"; shift 2 ;;
     --) shift; CHAOS_ARGS=("$@"); break ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
@@ -87,14 +70,9 @@ mkdir -p "$RESULTS_DIR"
 # worker.py's own ack guarantee (process_message's try/except/finally).
 DRAIN_TIMEOUT_SECONDS="${DRAIN_TIMEOUT_SECONDS:-180}"
 
-if [ -n "$SURGE_RATE" ]; then
-  TOTAL_DURATION=$(( ${STEADY%.*} + ${SURGE_DURATION%.*} + ${RECOVERY%.*} ))
-else
-  TOTAL_DURATION="$DURATION"
-fi
-# Same idea for the send phase -- total duration + 2 minutes of slack
-# before concluding load_generator.py/chaos.py is actually stuck.
-SEND_TIMEOUT_SECONDS="${SEND_TIMEOUT_SECONDS:-$((TOTAL_DURATION + 120))}"
+# Same idea for the send phase -- duration + 2 minutes of slack before
+# concluding load_generator.py/chaos.py is actually stuck.
+SEND_TIMEOUT_SECONDS="${SEND_TIMEOUT_SECONDS:-$((DURATION + 120))}"
 
 # Polls whether PID is still alive once a second; force-kills it past
 # $2 seconds so a hung load_generator/chaos process can't stall the script.
@@ -155,39 +133,6 @@ run_once() {
       --api-url "http://localhost:8000" \
       --endpoint-url "http://receiver_mock:9000/webhook" \
       --output "$ingest_csv" &
-    local loadgen_pid=$!
-    wait_with_timeout "$loadgen_pid" "$SEND_TIMEOUT_SECONDS" "load_generator.py" || \
-      echo "  continuing with whatever data was captured before the kill"
-
-  elif [ -n "$SURGE_RATE" ]; then
-    echo "=== [$run_label] surge fault -- base rate=$RATE, surge rate=$SURGE_RATE, capacity=$CAPACITY @ ${SERVICE_LATENCY_MS}ms, steady/surge/recovery=${STEADY}/${SURGE_DURATION}/${RECOVERY}s ==="
-    # Fixed capacity AND fixed service latency for the whole run -- the
-    # fault is the real rate surge exceeding the resulting sustainable
-    # throughput (capacity / service_time), not an admin call flipping
-    # synthetic errors on/off. latency_ms=0 here would make max_concurrency
-    # meaningless: with ~instant processing, slots free up too fast for
-    # any realistic rate to saturate them.
-    curl -s -X POST "http://localhost:9000/admin/chaos" \
-      -H "Content-Type: application/json" \
-      -d "{\"max_concurrency\": $CAPACITY, \"reject_rate\": 0, \"latency_ms\": $SERVICE_LATENCY_MS}" > /dev/null
-
-    python3 -c "
-mu = $CAPACITY / ($SERVICE_LATENCY_MS / 1000)
-print(f'  sustainable throughput (mu) = capacity/service_time = {$CAPACITY}/{$SERVICE_LATENCY_MS}ms = {mu:.1f} req/s')
-print(f'  steady rho = rate/mu = {$RATE}/{mu:.1f} = {$RATE/mu:.2f}' + ('  (WARNING: >=1, steady phase is already overloaded)' if $RATE/mu >= 1 else ''))
-print(f'  surge rho  = surge-rate/mu = {$SURGE_RATE}/{mu:.1f} = {$SURGE_RATE/mu:.2f}' + ('  (WARNING: <1, surge will not actually overload the receiver)' if $SURGE_RATE/mu < 1 else ''))
-"
-
-    local poisson_flag=()
-    [ "$POISSON" = true ] && poisson_flag=(--poisson)
-
-    python3 load_generator.py \
-      --rate "$RATE" --surge-rate "$SURGE_RATE" \
-      --steady "$STEADY" --surge-duration "$SURGE_DURATION" --recovery "$RECOVERY" \
-      "${poisson_flag[@]}" \
-      --api-url "http://localhost:8000" \
-      --endpoint-url "http://receiver_mock:9000/webhook" \
-      --output "$ingest_csv" --timeline-output "$timeline_json" &
     local loadgen_pid=$!
     wait_with_timeout "$loadgen_pid" "$SEND_TIMEOUT_SECONDS" "load_generator.py" || \
       echo "  continuing with whatever data was captured before the kill"

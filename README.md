@@ -94,7 +94,7 @@ cd scripts
 ./run_experiment.sh naive_test --policy naive -- --max-concurrency 1 --reject-rate 0.3
 ```
 
-Check `scripts/run_experiment.sh`'s header comment for the full set of flags, including the newer surge-driven fault mode (`--surge-rate`, `--poisson`, `--repeats`). That mode triggers overload with a genuine offered-rate surge against the receiver's fixed real capacity, instead of an admin endpoint switching synthetic errors on and off.
+Check `scripts/run_experiment.sh`'s header comment for the full set of flags, including `--repeats N` to rerun a condition multiple times, and `--no-chaos` for a pure-volume test with no fault at all.
 
 ## Tech stack
 
