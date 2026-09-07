@@ -54,7 +54,7 @@ All three implement the same two-method interface (`worker/retry_policies.py`), 
 |---|---|
 | `none` | One failed attempt goes straight to dead-letter. This is the experimental baseline: it isolates whether retrying itself is what amplifies load, independent of any backoff strategy. |
 | `naive` | Bounded exponential backoff with jitter, capped at 5 attempts. It's stateless: the delay only depends on how many times *this* message has been attempted, with no memory of how the endpoint is behaving overall. |
-| `adaptive` | A per-endpoint failure-rate gate based on [RetryGuard](docs/references/09_tavori_retryguard_arXiv2511.23278.pdf) (Tavori et al., 2025). Retries get disabled once an endpoint's failure rate stays above 20% for 3 consecutive 10-second measurement windows, and re-enabled once the same streak drops back below it. When the gate is open, it reuses naive's backoff timing, so the gate itself is the only thing that differs between the two conditions. |
+| `adaptive` | A per-endpoint failure-rate gate based on [RetryGuard](https://arxiv.org/abs/2511.23278) (Tavori et al., 2025). Retries get disabled once an endpoint's failure rate stays above 20% for 3 consecutive 10-second measurement windows, and re-enabled once the same streak drops back below it. When the gate is open, it reuses naive's backoff timing, so the gate itself is the only thing that differs between the two conditions. |
 
 ## Results
 
@@ -110,7 +110,7 @@ Python 3.12, FastAPI, SQLAlchemy 2.0, PostgreSQL 18, Redis 7 (Streams), httpx (a
 
 ## References
 
-Source PDFs for the papers used most directly are in `docs/references/`. The adaptive policy is a direct, simplified port of RetryGuard's productive-retry controller (Tavori, Bremler-Barr, Levy & Lavi, 2025).
+The adaptive policy is a direct, simplified port of RetryGuard's productive-retry controller ([Tavori, Bremler-Barr, Levy & Lavi, 2025](https://arxiv.org/abs/2511.23278)). Source PDFs for papers cited across this project aren't redistributed here (copyright status varies by venue); see each paper's own page for the original.
 
 ## License
 
