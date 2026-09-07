@@ -105,6 +105,39 @@ async def run_analyze(
         raise RuntimeError(f"analyze.py failed:\n{out.decode()}")
 
 
+async def live_chart_updater(
+    run: TestRun, delivery_csv: Path, chart_png: Path,
+    timeline_json: Path, chaos_enabled: bool, interval_seconds: float = 4.0,
+) -> None:
+    """Periodically snapshots the worker's (now continuously-flushed)
+    delivery log and regenerates chart.png in place while a run is still
+    RUNNING, so /test/result/{run_id}/chart.png -- the same endpoint the
+    frontend already polls at the end -- serves a live-updating chart
+    instead of nothing until the run finishes. Deliberately reuses
+    analyze.py and the existing chart endpoint rather than a client-side
+    charting library or a new streaming pipeline: same reasoning as the
+    events feed, smaller surface area than it sounds. Cancelled by the
+    caller once load generation finishes, not self-terminating, since
+    checking run.status here would race the caller's own transition to
+    DRAINING immediately after this task is awaited alongside it.
+    """
+    while True:
+        try:
+            await docker_control.extract_delivery_log(str(delivery_csv))
+            # chaos.py only writes timeline_json once its full steady/fault/
+            # recovery sequence completes -- during the live window it
+            # doesn't exist yet, so fault-window shading is skipped until
+            # the final post-drain analyze.py call (which always has it).
+            await run_analyze(
+                run.label, delivery_csv, chart_png,
+                timeline_json=timeline_json if (chaos_enabled and timeline_json.exists()) else None,
+            )
+            run.result_dir = delivery_csv.parent
+        except Exception as e:
+            print(f"[harness] live_chart_updater snapshot failed: {e}")
+        await asyncio.sleep(interval_seconds)
+
+
 async def publish_event(text: str) -> None:
     """Live event feed for the frontend's status panel -- a capped Redis
     list shared with worker.py's own publish_event, not a real log
@@ -127,6 +160,11 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
     delivery_csv = run_dir / "delivery.csv"
     timeline_json = run_dir / "timeline.json"
     chart_png = run_dir / "chart.png"
+
+    # Declared before the try so a cancellation during asyncio.gather (which
+    # jumps straight past the explicit live_chart_task.cancel() call further
+    # down) still has a task here to clean up in the except block below.
+    live_chart_task: Optional[asyncio.Task] = None
 
     try:
         run.status = RunStatus.STARTING
@@ -185,6 +223,14 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
             poisson=run.poisson,
         )
 
+        # Not inside the gather() below -- it runs an unconditional loop
+        # (no natural end of its own), so it's launched and cancelled
+        # separately rather than racing the transition to DRAINING that
+        # happens right after load generation/chaos actually finish.
+        live_chart_task = asyncio.create_task(
+            live_chart_updater(run, delivery_csv, chart_png, timeline_json, chaos_config.enabled)
+        )
+
         if chaos_config.enabled:
             chaos_task = chaos_module.run(
                 receiver_url=RECEIVER_URL,
@@ -202,6 +248,12 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
             await asyncio.gather(load_gen_task, chaos_task)
         else:
             await load_gen_task
+
+        live_chart_task.cancel()
+        try:
+            await live_chart_task
+        except asyncio.CancelledError:
+            pass
 
         run.status = RunStatus.DRAINING
         await wait_for_drain(DRAIN_STALL_SECONDS)
@@ -225,7 +277,12 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
         # still gets torn down -- otherwise cancellation would skip
         # straight past this function's cleanup and leave containers
         # running, the same "reported done but the real outcome didn't
-        # happen" shape as most of the other bugs in this project.
+        # happen" shape as most of the other bugs in this project. A
+        # cancellation landing inside the asyncio.gather() above also
+        # jumps straight past the explicit live_chart_task.cancel() call,
+        # so it's repeated here.
+        if live_chart_task and not live_chart_task.done():
+            live_chart_task.cancel()
         run.status = RunStatus.CANCELLED
         run.error = "Cancelled by user"
         try:
@@ -233,6 +290,8 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
         except Exception:
             pass
     except Exception as e:
+        if live_chart_task and not live_chart_task.done():
+            live_chart_task.cancel()
         run.status = RunStatus.FAILED
         run.error = str(e)
         try:

@@ -49,12 +49,19 @@ retry_policy = get_policy(RETRY_POLICY_NAME)
 
 Base.metadata.create_all(bind=engine)
 
-# Buffered in memory, flushed once at shutdown -- see handle_shutdown().
-_log_rows = []
+# Written and flushed as each row happens, not buffered -- a killed run
+# would otherwise lose everything not yet written (the same class of bug
+# load_generator.py already fixed for its own CSV), and it means this file
+# is a valid, current snapshot on disk at any moment, which is what makes
+# a live mid-run chart possible at all.
+_log_file = open(DELIVERY_LOG_PATH, "w", newline="")
+_log_writer = csv.writer(_log_file)
+_log_writer.writerow(["timestamp", "event_id", "endpoint_id", "attempt", "outcome", "latency_ms", "error"])
+_log_file.flush()
 
 
 def log_delivery(fields: dict, attempt: int, outcome: str, latency_ms: float, error: str = ""):
-    _log_rows.append([
+    _log_writer.writerow([
         datetime.now(timezone.utc).isoformat(),
         fields["event_id"],
         fields["endpoint_id"],
@@ -63,19 +70,12 @@ def log_delivery(fields: dict, attempt: int, outcome: str, latency_ms: float, er
         f"{latency_ms:.2f}",
         error,
     ])
-
-
-def flush_delivery_log():
-    with open(DELIVERY_LOG_PATH, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["timestamp", "event_id", "endpoint_id", "attempt", "outcome", "latency_ms", "error"])
-        writer.writerows(_log_rows)
-    print(f"[worker] wrote {len(_log_rows)} delivery log rows to {DELIVERY_LOG_PATH}")
+    _log_file.flush()
 
 
 def handle_shutdown(signum, frame):
-    print(f"[worker] received shutdown signal ({signum}), flushing delivery log")
-    flush_delivery_log()
+    print(f"[worker] received shutdown signal ({signum}), closing delivery log")
+    _log_file.close()
     sys.exit(0)
 
 

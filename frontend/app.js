@@ -11,6 +11,7 @@ const progressFill = document.getElementById("progress-fill");
 const errorBox = document.getElementById("error-box");
 
 const resultPanel = document.getElementById("result-panel");
+const resultHeading = document.getElementById("result-heading");
 const chartImg = document.getElementById("chart-img");
 
 const eventsPanel = document.getElementById("events-panel");
@@ -183,6 +184,19 @@ async function pollStatus(runId) {
   }
   setStatus(data.status, detail);
 
+  if (data.status === "running") {
+    // Best-effort live chart -- 404s until the harness's first periodic
+    // snapshot exists, so probe with a throwaway Image() rather than
+    // pointing chart-img straight at a URL that might not be ready yet.
+    const probe = new Image();
+    probe.onload = () => {
+      chartImg.src = probe.src;
+      resultHeading.textContent = "Result (live)";
+      resultPanel.hidden = false;
+    };
+    probe.src = `/test/result/${runId}/chart.png?t=${Date.now()}`;
+  }
+
   if (TERMINAL_STATUSES.has(data.status)) {
     stopPolling();
     startBtn.disabled = false;
@@ -191,6 +205,7 @@ async function pollStatus(runId) {
 
     if (data.status === "done") {
       chartImg.src = `/test/result/${runId}/chart.png?t=${Date.now()}`;
+      resultHeading.textContent = "Result";
       resultPanel.hidden = false;
     } else {
       errorBox.hidden = false;
