@@ -13,6 +13,9 @@ const errorBox = document.getElementById("error-box");
 const resultPanel = document.getElementById("result-panel");
 const chartImg = document.getElementById("chart-img");
 
+const eventsPanel = document.getElementById("events-panel");
+const eventsList = document.getElementById("events-list");
+
 const durationInput = document.getElementById("duration");
 const rateInput = document.getElementById("rate");
 const workerConcurrencyInput = document.getElementById("worker-concurrency");
@@ -145,7 +148,19 @@ async function fetchHistory() {
   }
 }
 
+async function fetchEvents() {
+  try {
+    const resp = await fetch("/test/events");
+    if (!resp.ok) return;
+    const events = await resp.json();
+    eventsList.innerHTML = events.map((e) => `<div class="event-line">${e}</div>`).join("");
+  } catch (err) {
+    // cosmetic feature -- a failed fetch here shouldn't disrupt the status poll
+  }
+}
+
 async function pollStatus(runId) {
+  fetchEvents();
   const resp = await fetch(`/test/status/${runId}`);
   if (!resp.ok) {
     setStatus("error", `couldn't fetch status (HTTP ${resp.status})`);
@@ -202,6 +217,8 @@ form.addEventListener("submit", async (e) => {
   errorBox.hidden = true;
   resultPanel.hidden = true;
   statusPanel.hidden = false;
+  eventsPanel.hidden = false;
+  eventsList.innerHTML = "";
   cancelBtn.hidden = false;
   progressFill.style.width = "0%";
   setStatus("starting", "");

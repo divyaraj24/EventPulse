@@ -54,7 +54,21 @@ All three implement the same two-method interface (`worker/retry_policies.py`), 
 |---|---|
 | `none` | One failed attempt goes straight to dead-letter. This is the experimental baseline: it isolates whether retrying itself is what amplifies load, independent of any backoff strategy. |
 | `naive` | Bounded exponential backoff with jitter, capped at 5 attempts. It's stateless: the delay only depends on how many times *this* message has been attempted, with no memory of how the endpoint is behaving overall. |
-| `adaptive` | A per-endpoint failure-rate gate based on [RetryGuard](https://arxiv.org/abs/2511.23278) (Tavori et al., 2025). Retries get disabled once an endpoint's failure rate stays above 20% for 3 consecutive 10-second measurement windows, and re-enabled once the same streak drops back below it. When the gate is open, it reuses naive's backoff timing, so the gate itself is the only thing that differs between the two conditions. |
+| `adaptive` | A per-endpoint on/off retry gate based on [RetryGuard](https://arxiv.org/abs/2511.23278) (Tavori et al., 2025), extended to watch latency in addition to rejection rate (see below). Retries get disabled once a measurement window looks unhealthy for 3 consecutive 10-second windows, and re-enabled once the same streak looks healthy again. When the gate is open, it reuses naive's backoff timing, so the gate itself is the only thing that differs between the two conditions. |
+
+### Adaptive policy: extending RetryGuard with a latency signal
+
+RetryGuard's own Algorithm 1, and both of the paper's real deployments (AWS Lambda/DynamoDB, Istio Bookinfo), gate retries on **rejection rate alone**. Section IV-D of the paper names response latency as a valid alternative surrogate signal — "if neither [retry volume nor rejection signals] are accessible, RetryGuard can use response delays... temporarily halting retries during high latency" — but specifies no algorithm for it and runs no experiment with it. It's mentioned once, as an implementation possibility, and left there.
+
+`AdaptivePolicy` (`worker/retry_policies.py`) implements that unevaluated variant, combined with the original signal rather than in place of it. The reason: a receiver can degrade — get slow — well before, or entirely without, ever producing an outright rejection. A rejection-only gate has nothing to react to in that case. This isn't hypothetical for this project specifically: an earlier experiment run here (concurrency ceiling set high enough to never bind, latency alone injected) produced exactly zero rejections despite a 30x jump in response time, which a rejection-only gate would have completely missed.
+
+**How it works.** Each 10-second measurement window is scored **elevated** if *either*:
+- its failure rate exceeds 20% (RetryGuard's own threshold, unchanged), **or**
+- its average latency exceeds 3x the endpoint's learned healthy-state baseline
+
+Three consecutive elevated windows disable retries; three consecutive non-elevated windows re-enable them — same streak-based hysteresis as the original single-signal gate, just fed by two inputs instead of one.
+
+The baseline isn't a fixed number (there's no universal "normal" latency across endpoints) — it's a slow-moving average (EWMA, weighted 90% history / 10% newest sample), updated only during confirmed-healthy windows, so a sustained fault can't drag its own detection threshold upward while it's happening. The rejection-rate signal is live from the very first window, exactly as in the original gate; the latency signal only starts contributing once a baseline exists (i.e., after the first non-elevated window establishes one), since there's nothing yet to compare against. A purely rejection-driven scenario is therefore unaffected — same detection speed as before, verified by a dedicated test (`test_adaptive_rejection_only_scenario_is_unaffected_by_latency_signal`).
 
 ## Results
 

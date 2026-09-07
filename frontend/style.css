@@ -269,3 +269,24 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .warn-note {
   color: var(--warn);
 }
+
+.events-list {
+  height: 220px;
+  overflow-y: auto;
+  background: #12141a;
+  color: #d7dce2;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.event-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.event-line:first-child {
+  color: #7ec8ff;
+}
