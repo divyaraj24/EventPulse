@@ -99,11 +99,23 @@
         <div id="progress-fill" class="progress-fill"></div>
       </div>
       <div id="error-box" class="error-box" hidden></div>
+      <button type="button" id="cancel-btn" class="secondary-btn" hidden>Cancel run</button>
     </section>
 
     <section class="panel" id="result-panel" hidden>
       <h2>Result</h2>
       <img id="chart-img" alt="Result chart">
+    </section>
+
+    <section class="panel" id="history-panel">
+      <h2>Recent runs</h2>
+      <table id="history-table">
+        <thead>
+          <tr><th>Label</th><th>Policy</th><th>Status</th><th>Started</th></tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+      <p id="history-empty" class="muted-note">No runs yet.</p>
     </section>
   </main>
 

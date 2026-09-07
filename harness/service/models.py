@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel
@@ -36,3 +37,15 @@ class TestStatusResponse(BaseModel):
     progress: dict
     chaos_phase: Optional[str] = None
     error: Optional[str] = None
+
+
+class RunHistoryEntry(BaseModel):
+    run_id: str
+    label: str
+    policy: str
+    status: str
+    started_at: datetime
+
+
+class MessageResponse(BaseModel):
+    detail: str

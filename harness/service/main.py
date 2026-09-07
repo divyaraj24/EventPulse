@@ -13,7 +13,14 @@ from fastapi.staticfiles import StaticFiles
 import chaos as chaos_module
 import docker_control
 import load_generator
-from models import ChaosConfig, TestStartRequest, TestStartResponse, TestStatusResponse
+from models import (
+    ChaosConfig,
+    MessageResponse,
+    RunHistoryEntry,
+    TestStartRequest,
+    TestStartResponse,
+    TestStatusResponse,
+)
 from run_state import RunRegistry, RunStatus, TestRun
 
 RESULTS_DIR = Path(os.getenv("HARNESS_RESULTS_DIR", "/app/results"))
@@ -139,6 +146,19 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
         run.status = RunStatus.DONE
         run.result_dir = run_dir
 
+    except asyncio.CancelledError:
+        # Thrown into whichever `await` was in flight when /test/cancel
+        # called task.cancel(). Caught (not re-raised) so the core stack
+        # still gets torn down -- otherwise cancellation would skip
+        # straight past this function's cleanup and leave containers
+        # running, the same "reported done but the real outcome didn't
+        # happen" shape as most of the other bugs in this project.
+        run.status = RunStatus.CANCELLED
+        run.error = "Cancelled by user"
+        try:
+            await docker_control.teardown_core()
+        except Exception:
+            pass
     except Exception as e:
         run.status = RunStatus.FAILED
         run.error = str(e)
@@ -169,8 +189,18 @@ async def start_test(req: TestStartRequest):
             "detail": "A test run is already in progress",
             "current_run_id": current.run_id if current else None,
         })
-    asyncio.create_task(execute_run(run, req.chaos))
+    run.task = asyncio.create_task(execute_run(run, req.chaos))
     return TestStartResponse(run_id=run.run_id, status=run.status.value)
+
+
+@app.post("/test/cancel", response_model=MessageResponse)
+async def cancel_test():
+    run = registry.current
+    if not run or run.status in (RunStatus.DONE, RunStatus.FAILED, RunStatus.CANCELLED):
+        raise HTTPException(status_code=409, detail="No run in progress to cancel")
+    if run.task:
+        run.task.cancel()
+    return MessageResponse(detail=f"Cancelling {run.run_id}")
 
 
 def _to_status_response(run: TestRun) -> TestStatusResponse:
@@ -194,6 +224,17 @@ async def status_by_id(run_id: str):
     if not run:
         raise HTTPException(status_code=404, detail="Unknown run_id")
     return _to_status_response(run)
+
+
+@app.get("/test/history", response_model=list[RunHistoryEntry])
+async def history():
+    return [
+        RunHistoryEntry(
+            run_id=r.run_id, label=r.label, policy=r.policy,
+            status=r.status.value, started_at=r.started_at,
+        )
+        for r in registry.list_recent()
+    ]
 
 
 @app.get("/test/result/{run_id}/chart.png")

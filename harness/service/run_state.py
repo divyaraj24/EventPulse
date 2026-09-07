@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -12,6 +13,7 @@ class RunStatus(str, Enum):
     EXTRACTING = "extracting"
     DONE = "done"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass
@@ -28,6 +30,9 @@ class TestRun:
     chaos_phase: Optional[str] = None
     error: Optional[str] = None
     result_dir: Optional[Path] = None
+    # Not part of the run's public state (status endpoints don't serialize
+    # this) -- lets /test/cancel find the in-flight task to cancel.
+    task: Optional[asyncio.Task] = None
 
 
 class RunRegistry:
@@ -68,3 +73,8 @@ class RunRegistry:
         if self._current and self._current.run_id == run_id:
             return self._current
         return self._history.get(run_id)
+
+    def list_recent(self) -> list[TestRun]:
+        # dict insertion order is chronological (oldest first); reverse for
+        # newest-first, which is what a history view wants.
+        return list(reversed(self._history.values()))

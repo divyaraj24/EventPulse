@@ -12,6 +12,13 @@ const errorBox = document.getElementById("error-box");
 const resultPanel = document.getElementById("result-panel");
 const chartImg = document.getElementById("chart-img");
 
+const cancelBtn = document.getElementById("cancel-btn");
+const historyTable = document.getElementById("history-table");
+const historyBody = document.getElementById("history-body");
+const historyEmpty = document.getElementById("history-empty");
+
+const TERMINAL_STATUSES = new Set(["done", "failed", "cancelled"]);
+
 let pollHandle = null;
 
 chaosCheckbox.addEventListener("change", () => {
@@ -35,12 +42,35 @@ function stopPolling() {
   }
 }
 
+async function fetchHistory() {
+  const resp = await fetch("/test/history");
+  if (!resp.ok) return;
+  const rows = await resp.json();
+
+  historyBody.innerHTML = "";
+  historyEmpty.hidden = rows.length > 0;
+  historyTable.hidden = rows.length === 0;
+
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    const started = new Date(r.started_at).toLocaleString();
+    tr.innerHTML = `
+      <td>${r.label}</td>
+      <td>${r.policy}</td>
+      <td><span class="badge badge-${r.status}">${r.status}</span></td>
+      <td>${started}</td>
+    `;
+    historyBody.appendChild(tr);
+  }
+}
+
 async function pollStatus(runId) {
   const resp = await fetch(`/test/status/${runId}`);
   if (!resp.ok) {
     setStatus("error", `couldn't fetch status (HTTP ${resp.status})`);
     stopPolling();
     startBtn.disabled = false;
+    cancelBtn.hidden = true;
     return;
   }
   const data = await resp.json();
@@ -57,18 +87,33 @@ async function pollStatus(runId) {
   }
   setStatus(data.status, detail);
 
-  if (data.status === "done") {
+  if (TERMINAL_STATUSES.has(data.status)) {
     stopPolling();
     startBtn.disabled = false;
-    chartImg.src = `/test/result/${runId}/chart.png?t=${Date.now()}`;
-    resultPanel.hidden = false;
-  } else if (data.status === "failed") {
-    stopPolling();
-    startBtn.disabled = false;
-    errorBox.hidden = false;
-    errorBox.textContent = data.error || "Run failed with no error message.";
+    cancelBtn.hidden = true;
+    fetchHistory();
+
+    if (data.status === "done") {
+      chartImg.src = `/test/result/${runId}/chart.png?t=${Date.now()}`;
+      resultPanel.hidden = false;
+    } else {
+      errorBox.hidden = false;
+      errorBox.textContent = data.error ||
+        (data.status === "cancelled" ? "Run was cancelled." : "Run failed with no error message.");
+    }
   }
 }
+
+cancelBtn.addEventListener("click", async () => {
+  cancelBtn.disabled = true;
+  try {
+    await fetch("/test/cancel", { method: "POST" });
+  } finally {
+    cancelBtn.disabled = false;
+  }
+});
+
+fetchHistory();
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -76,6 +121,7 @@ form.addEventListener("submit", async (e) => {
   errorBox.hidden = true;
   resultPanel.hidden = true;
   statusPanel.hidden = false;
+  cancelBtn.hidden = false;
   progressFill.style.width = "0%";
   setStatus("starting", "");
 
@@ -107,6 +153,7 @@ form.addEventListener("submit", async (e) => {
   } catch (err) {
     setStatus("error", "couldn't reach the harness API");
     startBtn.disabled = false;
+    cancelBtn.hidden = true;
     return;
   }
 
@@ -114,11 +161,13 @@ form.addEventListener("submit", async (e) => {
     const body = await resp.json();
     setStatus("busy", body.detail?.detail || "a test is already running");
     startBtn.disabled = false;
+    cancelBtn.hidden = true;
     return;
   }
   if (!resp.ok) {
     setStatus("error", `HTTP ${resp.status}`);
     startBtn.disabled = false;
+    cancelBtn.hidden = true;
     return;
   }
 

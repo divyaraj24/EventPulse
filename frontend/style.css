@@ -151,6 +151,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .badge-draining, .badge-extracting { background: #fdf2e0; color: var(--warn); }
 .badge-done { background: #e5f6ec; color: var(--ok); }
 .badge-failed, .badge-error { background: #fbe9e9; color: var(--err); }
+.badge-cancelled, .badge-busy { background: #eef0f5; color: var(--muted); }
 
 #status-detail {
   color: var(--muted);
@@ -186,4 +187,40 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   width: 100%;
   border-radius: 6px;
   border: 1px solid var(--border);
+}
+
+.secondary-btn {
+  margin-top: 12px;
+  background: transparent;
+  color: var(--err);
+  border: 1px solid var(--err);
+}
+
+.secondary-btn:hover:not(:disabled) {
+  background: #fbe9e9;
+}
+
+#history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+#history-table th {
+  text-align: left;
+  padding: 6px 8px;
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+#history-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.muted-note {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
 }
