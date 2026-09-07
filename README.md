@@ -29,6 +29,10 @@ Harness (`harness/docker-compose.yml`, persistent across runs):
 Ingest API → Transactional Outbox → Relay → Redis Stream → Worker Pool (Retry Policy) → Signed HTTP Delivery → Receiver
 ```
 
+A run is single-flight (one at a time, `409` if another is already going) and moves through a fixed sequence of states, torn down cleanly on both failure and cancellation:
+
+![Harness run lifecycle](docs/assets/harness_lifecycle.png)
+
 Every service except the worker doesn't care which retry policy is active. Switching between `none`, `naive`, and `adaptive` only changes the worker's configuration, so the fault applies identically no matter which condition is running.
 
 <details>
