@@ -69,7 +69,7 @@ services:
     networks:
       - eventpulse-net
 
-  # receiver_mock lives in docker-compose.harness.yml -- it's part of the
+  # receiver_mock lives in harness/docker-compose.yml -- it's part of the
   # test harness, not the product, and stays up across runs instead of
   # being torn down with the rest of these services. Bring the harness
   # stack up first (it creates this network); worker just needs it

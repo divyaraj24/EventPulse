@@ -28,10 +28,10 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
 ANALYZE_PY = PROJECT_DIR / "harness" / "analyze.py"
 
-# Unlike analyze.py, the frontend lives inside harness/service/ itself, so
-# it IS copied into the image at build time (Dockerfile's `COPY . .`) --
-# __file__-relative resolution is correct here, not PROJECT_DIR.
-FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
+# Lives at the repo root (product-facing UI, not harness-internal), and --
+# same as analyze.py -- is only reachable via the bind mount, not baked
+# into the image. Editing it also doesn't require an image rebuild.
+FRONTEND_DIR = PROJECT_DIR / "frontend"
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 API_URL = os.getenv("API_URL", "http://api:8000")
 DRAIN_TIMEOUT_SECONDS = float(os.getenv("DRAIN_TIMEOUT_SECONDS", "180"))

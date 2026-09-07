@@ -2,7 +2,7 @@
 
 [![CircleCI](https://dl.circleci.com/status-badge/img/circleci/6uVYqMakkoyjmqM1huUNSW/FU7aux9tfv5qfgY62LR2PR/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/circleci/6uVYqMakkoyjmqM1huUNSW/FU7aux9tfv5qfgY62LR2PR/tree/main)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](api/Dockerfile)
-[![Docker Compose v2](https://img.shields.io/badge/Docker%20Compose-v2-2496ED.svg)](docker-compose.yml)
+[![Docker Compose v2](https://img.shields.io/badge/Docker%20Compose-v2-2496ED.svg)](docker-compose.core.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A reliable webhook delivery system with failure analytics. It's a durable, at-least-once delivery pipeline that gets deliberately subjected to controlled chaos, so we can measure exactly when automatic retry stops helping and starts sustaining the outage it was supposed to fix.
@@ -13,14 +13,17 @@ Webhooks depend on third-party receivers that time out or fail intermittently, a
 
 ![System architecture](docs/assets/architecture.png)
 
-Five containerized services on an internal Docker network, plus two host-side scripts that drive experiments:
+The repo splits into the **core product** (the delivery pipeline actually being tested) and the **harness** (test infrastructure that drives it), so the two are never confused with each other:
 
+Core product (`docker-compose.core.yml`, rebuilt fresh for every test run):
 - **Ingest API**: accepts `POST /events`, writes the event and an outbox row in a single Postgres transaction (the transactional outbox pattern), and returns `202 Accepted`. That single-transaction write is what guarantees an accepted event is never silently lost, regardless of what happens downstream.
 - **Relay**: polls the outbox for unpublished rows and publishes them to a Redis Stream, marking each row published once it succeeds.
 - **Worker pool**: consumes the stream through a consumer group, signs each payload with HMAC-SHA256, delivers over HTTP under a bounded concurrency limit, and applies whichever retry policy is active.
-- **Mock receiver**: a controllable stand-in for a third-party endpoint. It exposes admin endpoints so we can set a concurrency ceiling, a random rejection rate, and injected latency at runtime.
 - **Postgres and Redis**: durable storage for events/outbox/dead-letters, and the delivery work queue.
-- **Load generator and chaos harness** (run on the host, not in Docker): generate paced offered load and drive the receiver through a steady/fault/recovery timeline.
+
+Harness (`harness/docker-compose.yml`, persistent across runs):
+- **Mock receiver**: a controllable stand-in for a third-party endpoint. It exposes admin endpoints so the harness can set a concurrency ceiling, a random rejection rate, and injected latency at runtime.
+- **Harness service**: a FastAPI service that owns the whole experiment lifecycle — rebuilding the core stack with the requested retry policy, generating paced offered load, driving the receiver through a steady/fault/recovery timeline, draining the queue, extracting results, and charting them. It also serves a small browser frontend (`frontend/`, at `/ui`) so a full run can be configured and watched without touching a terminal; `harness/main.py` is the equivalent CLI client for scripted/manual runs.
 
 ```
 Ingest API → Transactional Outbox → Relay → Redis Stream → Worker Pool (Retry Policy) → Signed HTTP Delivery → Receiver
@@ -82,22 +85,20 @@ Naive is the only policy that doesn't even finish processing the offered load. I
 
 ## Running it
 
-> Undergoing a restructuring into a harness service + core product split; this section is being rewritten to match (see `PROJECT_HISTORY.md`). The short version below works today.
-
-Bring up the harness (persistent across runs, controls everything else):
+Bring up the harness (persistent across runs, controls everything else — the core product is rebuilt fresh per run, not started here):
 
 ```bash
 docker compose -f harness/docker-compose.yml up -d --build --wait
 ```
 
-Run a full experiment (the harness handles rebuilding the core product, load + fault injection, drain, extraction, and charting):
+Then either open the browser UI at [http://localhost:8080/ui/](http://localhost:8080/ui/) and configure a run from the form, or drive it from the CLI:
 
 ```bash
 python3 harness/main.py naive_test --policy naive --rate 15 --duration 50 \
   --chaos --max-concurrency 1 --reject-rate 0.3
 ```
 
-Run `python3 harness/main.py --help` for the full set of flags.
+Run `python3 harness/main.py --help` for the full set of flags. Only one run executes at a time (`POST /test/start` returns `409` while one is in progress) — this applies regardless of whether it was started from the UI or the CLI, since both just call the same harness API.
 
 ## Tech stack
 
