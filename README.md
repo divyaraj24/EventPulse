@@ -54,17 +54,17 @@ All three implement the same two-method interface (`worker/retry_policies.py`), 
 All numbers below are reproducible, not pre-committed data to take on faith. Clone the repo and run each condition yourself:
 
 ```bash
-cd scripts
+docker compose -f harness/docker-compose.yml up -d --build --wait
 for policy in none naive adaptive; do
-  ./run_experiment.sh ${policy}_hardfault --policy "$policy" --rate 15 --duration 180 \
-    -- --steady 15 --fault 90 --recovery 60 --max-concurrency 1 --latency-ms 300 \
-       --recovered-max-concurrency 2
+  python3 harness/main.py ${policy}_hardfault --policy "$policy" --rate 15 --duration 180 \
+    --chaos --steady 15 --fault 90 --recovery 60 --max-concurrency 1 --latency-ms 300 \
+    --recovered-max-concurrency 2
 done
 ```
 
 Same offered load and the same 90-second fault (deliberately throttled recovery capacity) across all three conditions; only the retry policy differs:
 
-![Combined comparison chart](scripts/results/charts/combined_hardfault.png)
+![Combined comparison chart](results/charts/combined_hardfault.png)
 
 | Condition | Delivered | Dead-lettered | Retries fired | Still unresolved (of 2700) |
 |---|---|---|---|---|
@@ -82,19 +82,22 @@ Naive is the only policy that doesn't even finish processing the offered load. I
 
 ## Running it
 
-```bash
-docker compose up --build -d --wait   # bring the full pipeline up
-docker compose down -v                # tear down
-```
+> Undergoing a restructuring into a harness service + core product split; this section is being rewritten to match (see `PROJECT_HISTORY.md`). The short version below works today.
 
-Run a full experiment (rebuild, load and fault injection in parallel, wait for drain, extract logs, chart):
+Bring up the harness (persistent across runs, controls everything else):
 
 ```bash
-cd scripts
-./run_experiment.sh naive_test --policy naive -- --max-concurrency 1 --reject-rate 0.3
+docker compose -f harness/docker-compose.yml up -d --build --wait
 ```
 
-Check `scripts/run_experiment.sh`'s header comment for the full set of flags, including `--repeats N` to rerun a condition multiple times, and `--no-chaos` for a pure-volume test with no fault at all.
+Run a full experiment (the harness handles rebuilding the core product, load + fault injection, drain, extraction, and charting):
+
+```bash
+python3 harness/main.py naive_test --policy naive --rate 15 --duration 50 \
+  --chaos --max-concurrency 1 --reject-rate 0.3
+```
+
+Run `python3 harness/main.py --help` for the full set of flags.
 
 ## Tech stack
 

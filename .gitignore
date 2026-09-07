@@ -5,6 +5,6 @@ __pycache__/
 .claude/
 # Only commit chart images from experiment runs, not the raw data --
 # CSVs/JSON grow unbounded as more tests are run. Charts stay trackable.
-scripts/results/**/*.csv
-scripts/results/**/*.json
+results/**/*.csv
+results/**/*.json
 docs/private/

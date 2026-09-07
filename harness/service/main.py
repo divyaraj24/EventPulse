@@ -18,7 +18,13 @@ from run_state import RunRegistry, RunStatus, TestRun
 RESULTS_DIR = Path(os.getenv("HARNESS_RESULTS_DIR", "/app/results"))
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-SCRIPTS_DIR = Path(os.getenv("SCRIPTS_DIR", "/workspace/scripts"))
+# NOT Path(__file__)-relative -- this file runs from /app/main.py inside
+# the container (COPY'd there at build time by the Dockerfile), not from
+# the bind-mounted repo path. analyze.py isn't COPY'd into the image at
+# all; it's only reachable via the bind mount, so PROJECT_DIR (which
+# docker_control.py already uses for the same reason) is the only
+# reliable way to find it.
+ANALYZE_PY = Path(os.getenv("PROJECT_DIR", "/workspace")) / "harness" / "analyze.py"
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 API_URL = os.getenv("API_URL", "http://api:8000")
 DRAIN_TIMEOUT_SECONDS = float(os.getenv("DRAIN_TIMEOUT_SECONDS", "180"))
@@ -48,7 +54,7 @@ async def run_analyze(
     label: str, delivery_csv: Path, chart_png: Path, timeline_json: Optional[Path] = None,
 ) -> None:
     cmd = [
-        "python3", str(SCRIPTS_DIR / "analyze.py"),
+        "python3", str(ANALYZE_PY),
         "--file", f"{label}:{delivery_csv}",
         "--output", str(chart_png),
     ]

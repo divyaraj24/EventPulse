@@ -1,10 +1,9 @@
 """
 Canonical, harness-callable version of fault injection -- async so it
 runs concurrently with load_generator.run() in the harness's own event
-loop via asyncio.gather(), not as a separate subprocess.
-scripts/chaos.py is a thin CLI wrapper importing this module directly
-(same pattern as load_generator.py), so there is only one real
-implementation to reason about.
+loop via asyncio.gather(), not as a separate subprocess. The only
+caller is harness/service/main.py; the old standalone CLI script this
+replaced is gone (see harness/main.py for the current CLI entry point).
 """
 import asyncio
 import json

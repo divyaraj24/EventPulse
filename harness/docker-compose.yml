@@ -29,7 +29,6 @@ services:
     environment:
       PROJECT_DIR: ${PWD}
       CORE_COMPOSE_FILE: docker-compose.core.yml
-      SCRIPTS_DIR: ${PWD}/scripts
       REDIS_URL: redis://redis:6379/0
       API_URL: http://api:8000
     ports:

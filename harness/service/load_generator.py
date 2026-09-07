@@ -1,10 +1,9 @@
 """
 Canonical, harness-callable version of load generation -- an async
 function the harness service awaits directly (via asyncio.gather
-alongside chaos.py, once that's wired in), not a subprocess.
-scripts/load_generator.py is a thin CLI wrapper importing this module
-directly (not a separate implementation), so there is only one real
-load-generation code path to reason about.
+alongside chaos.py), not a subprocess. The only caller is
+harness/service/main.py; the old standalone CLI script this replaced
+is gone (see harness/main.py for the current CLI entry point).
 """
 import asyncio
 import csv
