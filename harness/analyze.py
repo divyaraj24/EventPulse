@@ -53,8 +53,16 @@ def compute_goodput_per_bucket(rows, bucket_seconds: float = 1.0):
     if not buckets:
         return [], [], start
 
+    # Drop the last bucket: it's whatever window was open when the data
+    # simply stopped (send schedule ended mid-second, or the tail of a
+    # retry backlog finished draining), so it almost never reflects a full
+    # bucket_seconds of real observation. Dividing by the full width anyway
+    # reads as an artificial goodput crash right at the end of every chart,
+    # not an actual delivery problem. Keep it if it's the only bucket there
+    # is -- nothing better to show.
     max_bucket = max(buckets.keys())
-    bucket_indices = list(range(max_bucket + 1))
+    last_full_bucket = max(max_bucket - 1, 0) if max_bucket > 0 else max_bucket
+    bucket_indices = list(range(last_full_bucket + 1))
     times = [b * bucket_seconds for b in bucket_indices]
     goodput = [buckets.get(b, 0) / bucket_seconds for b in bucket_indices]
     return times, goodput, start
