@@ -63,6 +63,7 @@ def run_once(client: httpx.Client, args, label: str, output_dir: str) -> bool:
         "policy": args.policy,
         "endpoint_id": args.endpoint_id,
         "worker_concurrency": args.worker_concurrency,
+        "poisson": args.poisson,
         "chaos": {
             "enabled": args.chaos,
             "steady": args.steady,
@@ -127,6 +128,11 @@ def main():
                               "(matches receiver_mock's own healthy-state default) so the receiver's "
                               "max-concurrency is the sole capacity constraint; lower it deliberately "
                               "to study worker-side overshoot as its own variable")
+    parser.add_argument("--poisson", action="store_true",
+                         help="exponential inter-arrival times instead of fixed-interval pacing -- "
+                              "matches RetryGuard's own M/M/1/m theoretical model (Sec V), at the cost "
+                              "of adding arrival-timing variance as an extra uncontrolled factor; "
+                              "default is fixed pacing, matching every existing result set")
     parser.add_argument("--chaos", action="store_true", help="enable fault injection (default: pure volume, no fault)")
     parser.add_argument("--steady", type=float, default=15.0, help="seconds of healthy baseline before the fault")
     parser.add_argument("--fault", type=float, default=40.0, help="seconds the fault stays active")

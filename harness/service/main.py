@@ -43,15 +43,30 @@ FRONTEND_DIR = PROJECT_DIR / "frontend"
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 API_URL = os.getenv("API_URL", "http://api:8000")
 RECEIVER_URL = os.getenv("RECEIVER_URL", "http://receiver_mock:9000")
-DRAIN_TIMEOUT_SECONDS = float(os.getenv("DRAIN_TIMEOUT_SECONDS", "180"))
+DRAIN_STALL_SECONDS = float(os.getenv("DRAIN_STALL_SECONDS", "30"))
+
+# Matches worker.py's own EVENTS_KEY/EVENTS_MAX -- both processes share
+# the same Redis instance already (this service already talks to it for
+# wait_for_drain), so this is just another key on it, not new infra.
+EVENTS_KEY = os.getenv("EVENTS_KEY", "harness:events")
 
 app = FastAPI(title="EventPulse Harness Service")
 registry = RunRegistry()
 
 
-async def wait_for_drain(timeout_seconds: float) -> None:
+async def wait_for_drain(stall_seconds: float) -> None:
+    """Waits for the delivery backlog (consumer-group lag + pending) to
+    reach zero. No absolute time cap -- a fixed timeout has to be guessed
+    per experiment size and silently truncates runs that are still
+    genuinely progressing (a severe retry storm can legitimately take far
+    longer than a "normal" run to resolve). Instead, watches whether the
+    backlog is actually shrinking and only gives up once it hasn't
+    improved at all for stall_seconds -- that's the real signal something
+    is stuck (a crashed worker, a lost connection), not just "this is a
+    big run."""
     r = aioredis.from_url(REDIS_URL, decode_responses=True)
-    start = asyncio.get_event_loop().time()
+    best_remaining = None
+    best_seen_at = asyncio.get_event_loop().time()
     try:
         while True:
             groups = await r.xinfo_groups("deliveries")
@@ -59,8 +74,14 @@ async def wait_for_drain(timeout_seconds: float) -> None:
             remaining = (g.get("lag") or 0) + (g.get("pending") or 0)
             if remaining <= 0:
                 return
-            if asyncio.get_event_loop().time() - start >= timeout_seconds:
-                return  # proceed anyway, same as run_experiment.sh's warn-and-continue
+            now = asyncio.get_event_loop().time()
+            if best_remaining is None or remaining < best_remaining:
+                best_remaining = remaining
+                best_seen_at = now
+            elif now - best_seen_at >= stall_seconds:
+                print(f"[harness] drain stalled at {remaining} remaining "
+                      f"(no improvement for {stall_seconds:.0f}s) -- proceeding anyway")
+                return
             await asyncio.sleep(1)
     finally:
         await r.aclose()
@@ -84,6 +105,21 @@ async def run_analyze(
         raise RuntimeError(f"analyze.py failed:\n{out.decode()}")
 
 
+async def publish_event(text: str) -> None:
+    """Live event feed for the frontend's status panel -- a capped Redis
+    list shared with worker.py's own publish_event, not a real log
+    pipeline. Cosmetic only: never let a publish failure affect the run."""
+    try:
+        r = aioredis.from_url(REDIS_URL, decode_responses=True)
+        try:
+            await r.lpush(EVENTS_KEY, text)
+            await r.ltrim(EVENTS_KEY, 0, 199)
+        finally:
+            await r.aclose()
+    except Exception:
+        pass
+
+
 async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
     run_dir = RESULTS_DIR / run.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -104,6 +140,19 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
         async with httpx.AsyncClient(timeout=5.0) as client:
             await chaos_module.call_admin(client, RECEIVER_URL, "/admin/reset")
         await docker_control.restart_core(run.policy, run.worker_concurrency)
+        # Only safe to touch the core stack's Redis after restart_core
+        # returns -- it's ephemeral (torn down/rebuilt every run), unlike
+        # receiver_mock's admin reset above. Clearing here, not before,
+        # avoids racing a Redis that doesn't exist yet.
+        try:
+            r = aioredis.from_url(REDIS_URL, decode_responses=True)
+            try:
+                await r.delete(EVENTS_KEY)
+            finally:
+                await r.aclose()
+        except Exception:
+            pass
+        await publish_event(f"run {run.run_id} starting (policy={run.policy}, rate={run.rate}/s, duration={run.duration}s)")
 
         run.status = RunStatus.RUNNING
 
@@ -112,6 +161,18 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
 
         def on_phase_change(phase: str) -> None:
             run.chaos_phase = phase
+            detail = {
+                "steady": "steady baseline",
+                "fault": (
+                    f"fault injected: concurrency={chaos_config.max_concurrency}, "
+                    f"latency={chaos_config.latency_ms}ms, reject_rate={chaos_config.reject_rate}"
+                ),
+                "recovery": (
+                    f"recovered: concurrency={chaos_config.recovered_max_concurrency}, "
+                    f"latency={chaos_config.recovered_latency_ms}ms"
+                ),
+            }.get(phase, phase)
+            asyncio.create_task(publish_event(f"[chaos] {detail}"))
 
         load_gen_task = load_generator.run(
             rate=run.rate,
@@ -121,6 +182,7 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
             endpoint_url=f"{RECEIVER_URL}/webhook",
             output_path=str(ingest_csv),
             on_progress=on_progress,
+            poisson=run.poisson,
         )
 
         if chaos_config.enabled:
@@ -142,7 +204,7 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
             await load_gen_task
 
         run.status = RunStatus.DRAINING
-        await wait_for_drain(DRAIN_TIMEOUT_SECONDS)
+        await wait_for_drain(DRAIN_STALL_SECONDS)
 
         run.status = RunStatus.EXTRACTING
         await docker_control.stop_worker()
@@ -193,6 +255,7 @@ async def start_test(req: TestStartRequest):
         policy=req.policy,
         endpoint_id=req.endpoint_id,
         worker_concurrency=req.worker_concurrency,
+        poisson=req.poisson,
         started_at=datetime.now(timezone.utc),
     )
     if not registry.try_start(run):
@@ -247,6 +310,24 @@ async def history():
         )
         for r in registry.list_recent()
     ]
+
+
+@app.get("/test/events", response_model=list[str])
+async def recent_events():
+    """Newest-first recent event strings from the shared Redis feed --
+    delivery outcomes, chaos phase changes, adaptive gate flips. Polled by
+    the frontend's live status panel; not a real log pipeline. The core
+    stack (and its Redis) doesn't exist between runs or during STARTING,
+    so this returns an empty list rather than erroring in that window --
+    cosmetic feature, never worth a 500."""
+    try:
+        r = aioredis.from_url(REDIS_URL, decode_responses=True)
+        try:
+            return await r.lrange(EVENTS_KEY, 0, 99)
+        finally:
+            await r.aclose()
+    except Exception:
+        return []
 
 
 @app.get("/test/result/{run_id}/chart.png")

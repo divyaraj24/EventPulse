@@ -29,6 +29,10 @@ class TestStartRequest(BaseModel):
     # has no throughput cap of its own). Set this lower only to deliberately
     # study worker-side overshoot as its own variable.
     worker_concurrency: int = 1000
+    # Fixed-interval pacing by default -- matches every existing result set.
+    # Opt-in Poisson arrivals (exponential inter-arrival times) for closer
+    # alignment with RetryGuard's own M/M/1/m theoretical model.
+    poisson: bool = False
     chaos: ChaosConfig = ChaosConfig()
 
 

@@ -30,6 +30,20 @@ DELIVERY_LOG_PATH = os.getenv("DELIVERY_LOG_PATH", "/app/delivery_log.csv")
 # and naive retry's pile-up behavior actually mean something.
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "20"))
 
+# Live event feed for the frontend's status panel -- a capped Redis list,
+# not a real log pipeline. Cosmetic only: never let a publish failure
+# affect delivery itself.
+EVENTS_KEY = os.getenv("EVENTS_KEY", "harness:events")
+EVENTS_MAX = int(os.getenv("EVENTS_MAX", "200"))
+
+
+async def publish_event(redis_client: redis.Redis, text: str) -> None:
+    try:
+        await redis_client.lpush(EVENTS_KEY, text)
+        await redis_client.ltrim(EVENTS_KEY, 0, EVENTS_MAX - 1)
+    except Exception:
+        pass
+
 RETRY_POLICY_NAME = os.getenv("RETRY_POLICY", "none")
 retry_policy = get_policy(RETRY_POLICY_NAME)
 
@@ -127,11 +141,14 @@ async def process_message(
         try:
             while True:
                 success, error, latency_ms = await attempt_delivery(client, fields)
-                retry_policy.record_attempt(fields["endpoint_id"], success)
+                retry_policy.record_attempt(fields["endpoint_id"], success, latency_ms)
+
+                short_id = fields["event_id"][:8]
 
                 if success:
                     print(f"[worker] delivered event {fields['event_id']} (attempt {attempt})")
                     log_delivery(fields, attempt, "delivered", latency_ms)
+                    await publish_event(redis_client, f"delivered {short_id} (attempt {attempt}, {latency_ms:.0f}ms)")
                     return
 
                 should_retry, delay = retry_policy.should_retry(fields["endpoint_id"], attempt)
@@ -139,9 +156,11 @@ async def process_message(
                 if not should_retry:
                     send_to_dlq(fields, attempts=attempt, last_error=error)
                     log_delivery(fields, attempt, "dlq", latency_ms, error=error)
+                    await publish_event(redis_client, f"dead-lettered {short_id} after {attempt} attempt(s)")
                     return
 
                 log_delivery(fields, attempt, "retry", latency_ms, error=error)
+                await publish_event(redis_client, f"retrying {short_id} (attempt {attempt} failed: {error})")
 
                 # Release the slot before backing off and reacquire before the
                 # next attempt -- holding it through the sleep would pin a
@@ -183,13 +202,29 @@ async def main():
     redis_client = redis.from_url(REDIS_URL, decode_responses=True)
     semaphore = asyncio.Semaphore(WORKER_CONCURRENCY)
 
+    if hasattr(retry_policy, "on_gate_change"):
+        def _on_gate_change(endpoint_id: str, retries_on: bool) -> None:
+            state = "opened" if retries_on else "closed"
+            asyncio.create_task(publish_event(redis_client, f"[adaptive] gate {state} for {endpoint_id}"))
+        retry_policy.on_gate_change = _on_gate_change  # type: ignore[attr-defined]
+
     await ensure_consumer_group(redis_client)
     print(
         f"[worker] starting -- policy='{RETRY_POLICY_NAME}', "
         f"concurrency={WORKER_CONCURRENCY}, consumer='{CONSUMER_NAME}'"
     )
 
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as http_client:
+    # Without explicit limits, httpx defaults to max_connections=100,
+    # max_keepalive_connections=20 -- comfortably above the old fixed
+    # WORKER_CONCURRENCY=20 default, but silently becomes an invisible
+    # second throttle now that worker_concurrency can be set much higher
+    # (default 1000, deliberately non-binding). Excess requests would queue
+    # inside httpx's own pool instead of the semaphore, invisible to our
+    # concurrency accounting, with constant connection churn on top since
+    # keepalive slots run out well before max_connections does. Same class
+    # of bug load_generator.py already hit and fixed for its own client.
+    limits = httpx.Limits(max_connections=WORKER_CONCURRENCY, max_keepalive_connections=min(WORKER_CONCURRENCY, 100))
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS, limits=limits) as http_client:
         while True:
             try:
                 response = await redis_client.xreadgroup(

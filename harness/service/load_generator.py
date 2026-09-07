@@ -7,6 +7,7 @@ is gone (see harness/main.py for the current CLI entry point).
 """
 import asyncio
 import csv
+import random
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
@@ -55,6 +56,7 @@ async def run(
     endpoint_url: str,
     output_path: str,
     on_progress: Optional[Callable[[int, int], None]] = None,
+    poisson: bool = False,
 ):
     interval = 1.0 / rate
     total_events = int(rate * duration)
@@ -88,11 +90,24 @@ async def run(
 
             start = time.monotonic()
             tasks: list[asyncio.Task] = []
+            next_poisson_time = start
 
             for seq in range(total_events):
-                # Schedule against an absolute target time rather than
-                # sleeping `interval` each loop, so pacing doesn't drift late.
-                target_time = start + seq * interval
+                if poisson:
+                    # Exponential inter-arrival time (mean 1/rate) --
+                    # matches the Poisson arrival process RetryGuard's own
+                    # M/M/1/m analysis (Sec V) assumes, unlike fixed-interval
+                    # pacing's more deterministic arrival process. Opt-in
+                    # only: existing results were all produced with fixed
+                    # pacing, and a controlled comparison across retry
+                    # policies benefits from not adding incidental
+                    # arrival-timing variance as an extra uncontrolled factor.
+                    next_poisson_time += random.expovariate(rate)
+                    target_time = next_poisson_time
+                else:
+                    # Schedule against an absolute target time rather than
+                    # sleeping `interval` each loop, so pacing doesn't drift late.
+                    target_time = start + seq * interval
                 now = time.monotonic()
                 if target_time > now:
                     await asyncio.sleep(target_time - now)
