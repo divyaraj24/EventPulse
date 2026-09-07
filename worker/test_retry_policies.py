@@ -130,6 +130,76 @@ def test_adaptive_respects_max_attempts():
     assert should_retry is False
 
 
+def test_adaptive_gate_closes_from_latency_alone_with_zero_rejections(monkeypatch):
+    """The extended signal: a receiver that never rejects but gets much
+    slower should still trip the gate, which a rejection-only gate could
+    never do (this is exactly the scenario this project's own
+    "concurrency non-binding" experiments produced empirically)."""
+    clock = FakeClock()
+    monkeypatch.setattr(rp.time, "monotonic", clock)
+    policy = rp.AdaptivePolicy()
+
+    # First window: all successes, ~10ms -- establishes the healthy
+    # baseline. Every attempt succeeds, so this can't close the gate via
+    # rejection rate.
+    for _ in range(5):
+        policy.record_attempt("endpoint", success=True, latency_ms=10.0)
+    clock.advance(rp.ADAPTIVE_MEASUREMENT_WINDOW_SECONDS + 0.1)
+    assert policy.should_retry("endpoint", attempt=1)[0] is True
+
+    # Then sustain latency well above ADAPTIVE_LATENCY_MULTIPLIER x baseline
+    # for 3 consecutive windows -- still zero rejections throughout.
+    for _ in range(rp.ADAPTIVE_INTERVAL_PERIODS):
+        for _ in range(5):
+            policy.record_attempt("endpoint", success=True, latency_ms=100.0)
+        clock.advance(rp.ADAPTIVE_MEASUREMENT_WINDOW_SECONDS + 0.1)
+
+    should_retry, _ = policy.should_retry("endpoint", attempt=1)
+    assert should_retry is False
+
+
+def test_adaptive_gate_reopens_after_latency_recovers(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(rp.time, "monotonic", clock)
+    policy = rp.AdaptivePolicy()
+
+    for _ in range(5):
+        policy.record_attempt("endpoint", success=True, latency_ms=10.0)
+    clock.advance(rp.ADAPTIVE_MEASUREMENT_WINDOW_SECONDS + 0.1)
+
+    for _ in range(rp.ADAPTIVE_INTERVAL_PERIODS):
+        for _ in range(5):
+            policy.record_attempt("endpoint", success=True, latency_ms=100.0)
+        clock.advance(rp.ADAPTIVE_MEASUREMENT_WINDOW_SECONDS + 0.1)
+    assert policy.should_retry("endpoint", attempt=1)[0] is False
+
+    # Latency drops back near the (frozen) baseline for the same streak length.
+    for _ in range(rp.ADAPTIVE_INTERVAL_PERIODS):
+        for _ in range(5):
+            policy.record_attempt("endpoint", success=True, latency_ms=10.0)
+        clock.advance(rp.ADAPTIVE_MEASUREMENT_WINDOW_SECONDS + 0.1)
+
+    should_retry, _ = policy.should_retry("endpoint", attempt=1)
+    assert should_retry is True
+
+
+def test_adaptive_rejection_only_scenario_is_unaffected_by_latency_signal(monkeypatch):
+    """A purely rejection-driven fault (zero latency ever recorded, i.e.
+    the default) must close the gate on exactly the same schedule as
+    before the latency signal was added -- no extra warm-up window."""
+    clock = FakeClock()
+    monkeypatch.setattr(rp.time, "monotonic", clock)
+    policy = rp.AdaptivePolicy()
+
+    for _ in range(rp.ADAPTIVE_INTERVAL_PERIODS):
+        for _ in range(5):
+            policy.record_attempt("endpoint", success=False)
+        clock.advance(rp.ADAPTIVE_MEASUREMENT_WINDOW_SECONDS + 0.1)
+
+    should_retry, _ = policy.should_retry("endpoint", attempt=1)
+    assert should_retry is False
+
+
 def test_get_policy_returns_correct_types():
     assert isinstance(rp.get_policy("none"), rp.NoRetryPolicy)
     assert isinstance(rp.get_policy("naive"), rp.NaiveBackoffPolicy)
