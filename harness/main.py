@@ -9,8 +9,7 @@ Start the harness stack first if it isn't already up:
 
 Usage:
     python harness/main.py naive_hardfault --policy naive --rate 15 --duration 180 \\
-        --chaos --steady 15 --fault 90 --recovery 60 --max-concurrency 1 \\
-        --latency-ms 300 --recovered-max-concurrency 2
+        --chaos --steady 15 --fault 90 --recovery 60 --max-concurrency 1 --latency-ms 300
 
     python harness/main.py smoke --rate 10 --duration 15
 
@@ -72,8 +71,6 @@ def run_once(client: httpx.Client, args, label: str, output_dir: str) -> bool:
             "max_concurrency": args.max_concurrency,
             "reject_rate": args.reject_rate,
             "latency_ms": args.latency_ms,
-            "recovered_max_concurrency": args.recovered_max_concurrency,
-            "recovered_latency_ms": args.recovered_latency_ms,
         },
     }
 
@@ -140,8 +137,6 @@ def main():
     parser.add_argument("--max-concurrency", type=int, default=3, help="capacity ceiling during the fault")
     parser.add_argument("--reject-rate", type=float, default=0.0, help="random rejection probability during the fault")
     parser.add_argument("--latency-ms", type=int, default=300, help="added latency during the fault")
-    parser.add_argument("--recovered-max-concurrency", type=int, default=5)
-    parser.add_argument("--recovered-latency-ms", type=int, default=100)
     parser.add_argument("--output-dir", default=".", help="where to save the fetched chart.png")
     parser.add_argument("--poll-interval", type=float, default=2.0)
     parser.add_argument("--repeats", type=int, default=1,
@@ -149,9 +144,12 @@ def main():
                               "(matches RetryGuard's own 3-repeats-per-condition methodology)")
     args = parser.parse_args()
 
+    # No separate "recovered" state to report rho for anymore -- when the
+    # fault clears, the receiver just reverts to its own fixed background
+    # operating point (see receiver_mock/main.py's BACKGROUND_* constants),
+    # not a per-run-configured tier.
     if args.chaos:
         print_rho("Fault", args.rate, args.max_concurrency, args.latency_ms, args.worker_concurrency)
-        print_rho("Recovery", args.rate, args.recovered_max_concurrency, args.recovered_latency_ms, args.worker_concurrency)
 
     with httpx.Client(timeout=10.0) as client:
         if args.repeats <= 1:

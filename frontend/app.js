@@ -23,7 +23,6 @@ const workerConcurrencyInput = document.getElementById("worker-concurrency");
 const chaosTimelineInputs = ["steady", "fault", "recovery"].map((id) => document.getElementById(id));
 const chaosTotalHint = document.getElementById("chaos-total-hint");
 const faultRhoHint = document.getElementById("fault-rho-hint");
-const recoveryRhoHint = document.getElementById("recovery-rho-hint");
 
 const cancelBtn = document.getElementById("cancel-btn");
 const historyTable = document.getElementById("history-table");
@@ -102,10 +101,9 @@ function describeRho(hintEl, phaseLabel, maxConcurrencyId, latencyMsId) {
 function updateRhoHints() {
   if (!chaosCheckbox.checked) return;
   describeRho(faultRhoHint, "Fault", "max-concurrency", "latency-ms");
-  describeRho(recoveryRhoHint, "Recovery", "recovered-max-concurrency", "recovered-latency-ms");
 }
 
-[rateInput, workerConcurrencyInput, "max-concurrency", "latency-ms", "recovered-max-concurrency", "recovered-latency-ms"]
+[rateInput, workerConcurrencyInput, "max-concurrency", "latency-ms"]
   .map((x) => (typeof x === "string" ? document.getElementById(x) : x))
   .forEach((el) => el.addEventListener("input", updateRhoHints));
 
@@ -252,8 +250,6 @@ form.addEventListener("submit", async (e) => {
       max_concurrency: parseInt(document.getElementById("max-concurrency").value, 10),
       reject_rate: num("reject-rate"),
       latency_ms: parseInt(document.getElementById("latency-ms").value, 10),
-      recovered_max_concurrency: parseInt(document.getElementById("recovered-max-concurrency").value, 10),
-      recovered_latency_ms: parseInt(document.getElementById("recovered-latency-ms").value, 10),
     },
   };
 

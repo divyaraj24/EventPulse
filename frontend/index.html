@@ -90,20 +90,7 @@
             <p id="fault-rho-hint" class="muted-note"></p>
           </div>
 
-          <div class="chaos-group">
-            <h3 class="chaos-group-title">During recovery</h3>
-            <div class="field-row">
-              <div class="field">
-                <label for="recovered-max-concurrency">Max concurrency</label>
-                <input type="number" id="recovered-max-concurrency" value="5" min="1">
-              </div>
-              <div class="field">
-                <label for="recovered-latency-ms">Latency (ms)</label>
-                <input type="number" id="recovered-latency-ms" value="100" min="0">
-              </div>
-            </div>
-            <p id="recovery-rho-hint" class="muted-note"></p>
-          </div>
+          <p class="muted-note">Recovery isn't separately configured: when the fault clears, the receiver just reverts to its own fixed background operating point (a real, finite capacity -- not an idealized instant reset), and stays there for the observation window.</p>
         </div>
 
         <button type="submit" id="start-btn">Start test</button>
