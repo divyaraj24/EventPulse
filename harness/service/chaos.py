@@ -30,8 +30,6 @@ async def run(
     max_concurrency: int,
     reject_rate: float,
     latency_ms: int,
-    recovered_max_concurrency: int,
-    recovered_latency_ms: int,
     timeline_output: Optional[str] = None,
     on_phase_change: Optional[Callable[[str], None]] = None,
 ) -> dict:
@@ -39,8 +37,6 @@ async def run(
         "params": {
             "receiver_url": receiver_url, "steady": steady, "fault": fault, "recovery": recovery,
             "max_concurrency": max_concurrency, "reject_rate": reject_rate, "latency_ms": latency_ms,
-            "recovered_max_concurrency": recovered_max_concurrency,
-            "recovered_latency_ms": recovered_latency_ms,
         }
     }
 
@@ -65,18 +61,18 @@ async def run(
         await asyncio.sleep(fault)
 
         timeline["fault_end"] = datetime.now(timezone.utc).isoformat()
-        # Not a full /admin/reset -- snapping to unconstrained capacity would
-        # let the whole backlog drain in one burst, hiding the difference
-        # between retry policies.
-        await call_admin(client, receiver_url, "/admin/chaos", {
-            "reject_rate": 0.0,
-            "latency_ms": recovered_latency_ms,
-            "max_concurrency": recovered_max_concurrency,
-        })
+        # A plain reset back to receiver_mock's background operating point
+        # (see BACKGROUND_LATENCY_MS/BACKGROUND_MAX_CONCURRENCY there) --
+        # not an idealized, unconstrained state. That background point is
+        # itself a real, finite capacity, which is what makes "revert to
+        # it" a meaningful recovery test instead of letting any backlog
+        # burst through in a single instant regardless of retry policy.
+        # This used to be a separately-configured "recovered" tier
+        # precisely because the old background state WAS unconstrained.
+        await call_admin(client, receiver_url, "/admin/reset")
         if on_phase_change:
             on_phase_change("recovery")
-        print(f"[harness.chaos] fault cleared -- recovered capacity: max_concurrency={recovered_max_concurrency}, "
-              f"latency_ms={recovered_latency_ms} -- observing recovery for {recovery}s")
+        print(f"[harness.chaos] fault cleared -- back to background capacity, observing recovery for {recovery}s")
         await asyncio.sleep(recovery)
 
         timeline["observation_end"] = datetime.now(timezone.utc).isoformat()

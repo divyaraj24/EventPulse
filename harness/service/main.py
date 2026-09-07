@@ -205,10 +205,7 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
                     f"fault injected: concurrency={chaos_config.max_concurrency}, "
                     f"latency={chaos_config.latency_ms}ms, reject_rate={chaos_config.reject_rate}"
                 ),
-                "recovery": (
-                    f"recovered: concurrency={chaos_config.recovered_max_concurrency}, "
-                    f"latency={chaos_config.recovered_latency_ms}ms"
-                ),
+                "recovery": "fault cleared, back to background capacity",
             }.get(phase, phase)
             asyncio.create_task(publish_event(f"[chaos] {detail}"))
 
@@ -240,8 +237,6 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
                 max_concurrency=chaos_config.max_concurrency,
                 reject_rate=chaos_config.reject_rate,
                 latency_ms=chaos_config.latency_ms,
-                recovered_max_concurrency=chaos_config.recovered_max_concurrency,
-                recovered_latency_ms=chaos_config.recovered_latency_ms,
                 timeline_output=str(timeline_json),
                 on_phase_change=on_phase_change,
             )

@@ -12,8 +12,11 @@ class ChaosConfig(BaseModel):
     max_concurrency: int = 3
     reject_rate: float = 0.0
     latency_ms: int = 0
-    recovered_max_concurrency: int = 5
-    recovered_latency_ms: int = 200
+    # No separate recovered_* fields -- when the fault clears, the receiver
+    # just resets to its own background operating point (a real, finite
+    # capacity, not an idealized unconstrained one -- see
+    # receiver_mock/main.py's BACKGROUND_* constants), rather than a
+    # second explicitly-configured degraded tier.
 
 
 class TestStartRequest(BaseModel):
