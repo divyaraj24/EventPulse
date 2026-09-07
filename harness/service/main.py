@@ -8,6 +8,7 @@ from typing import Optional
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 import chaos as chaos_module
 import docker_control
@@ -24,7 +25,13 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 # all; it's only reachable via the bind mount, so PROJECT_DIR (which
 # docker_control.py already uses for the same reason) is the only
 # reliable way to find it.
-ANALYZE_PY = Path(os.getenv("PROJECT_DIR", "/workspace")) / "harness" / "analyze.py"
+PROJECT_DIR = Path(os.getenv("PROJECT_DIR", "/workspace"))
+ANALYZE_PY = PROJECT_DIR / "harness" / "analyze.py"
+
+# Unlike analyze.py, the frontend lives inside harness/service/ itself, so
+# it IS copied into the image at build time (Dockerfile's `COPY . .`) --
+# __file__-relative resolution is correct here, not PROJECT_DIR.
+FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 API_URL = os.getenv("API_URL", "http://api:8000")
 DRAIN_TIMEOUT_SECONDS = float(os.getenv("DRAIN_TIMEOUT_SECONDS", "180"))
@@ -203,3 +210,6 @@ async def result_chart(run_id: str):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+app.mount("/ui", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EventPulse — Experiment Runner</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>EventPulse</h1>
+    <p class="subtitle">Retry-policy behavior under controlled fault injection</p>
+  </header>
+
+  <main>
+    <section class="panel" id="config-panel">
+      <h2>Run a test</h2>
+      <form id="test-form">
+        <div class="field">
+          <label for="label">Label</label>
+          <input type="text" id="label" value="demo_run" required>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="rate">Rate (events/s)</label>
+            <input type="number" id="rate" value="15" min="1" step="0.1" required>
+          </div>
+          <div class="field">
+            <label for="duration">Duration (s)</label>
+            <input type="number" id="duration" value="50" min="1" required>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="policy">Retry policy</label>
+          <select id="policy">
+            <option value="none">none</option>
+            <option value="naive">naive</option>
+            <option value="adaptive" selected>adaptive</option>
+          </select>
+        </div>
+
+        <div class="field checkbox-field">
+          <label><input type="checkbox" id="chaos-enabled"> Enable fault injection</label>
+        </div>
+
+        <div id="chaos-fields" class="chaos-fields" hidden>
+          <div class="field-row">
+            <div class="field">
+              <label for="steady">Steady (s)</label>
+              <input type="number" id="steady" value="15" min="0">
+            </div>
+            <div class="field">
+              <label for="fault">Fault (s)</label>
+              <input type="number" id="fault" value="40" min="0">
+            </div>
+            <div class="field">
+              <label for="recovery">Recovery (s)</label>
+              <input type="number" id="recovery" value="60" min="0">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="max-concurrency">Max concurrency (fault)</label>
+              <input type="number" id="max-concurrency" value="3" min="1">
+            </div>
+            <div class="field">
+              <label for="reject-rate">Reject rate</label>
+              <input type="number" id="reject-rate" value="0" min="0" max="1" step="0.05">
+            </div>
+            <div class="field">
+              <label for="latency-ms">Latency (ms, fault)</label>
+              <input type="number" id="latency-ms" value="0" min="0">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="recovered-max-concurrency">Max concurrency (recovered)</label>
+              <input type="number" id="recovered-max-concurrency" value="5" min="1">
+            </div>
+            <div class="field">
+              <label for="recovered-latency-ms">Latency (ms, recovered)</label>
+              <input type="number" id="recovered-latency-ms" value="200" min="0">
+            </div>
+          </div>
+        </div>
+
+        <button type="submit" id="start-btn">Start test</button>
+      </form>
+    </section>
+
+    <section class="panel" id="status-panel" hidden>
+      <h2>Status</h2>
+      <div id="status-line" class="status-line">
+        <span id="status-badge" class="badge">idle</span>
+        <span id="status-detail"></span>
+      </div>
+      <div class="progress-bar">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+      <div id="error-box" class="error-box" hidden></div>
+    </section>
+
+    <section class="panel" id="result-panel" hidden>
+      <h2>Result</h2>
+      <img id="chart-img" alt="Result chart">
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
