@@ -22,6 +22,7 @@ class TestStartRequest(BaseModel):
     duration: float
     policy: str = "none"
     endpoint_id: str = "test1"
+    worker_concurrency: int = 20
     chaos: ChaosConfig = ChaosConfig()
 
 

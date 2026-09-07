@@ -25,6 +25,7 @@ class TestRun:
     duration: float
     policy: str
     endpoint_id: str
+    worker_concurrency: int
     started_at: datetime
     progress: dict = field(default_factory=lambda: {"events_sent": 0, "events_total": 0})
     chaos_phase: Optional[str] = None

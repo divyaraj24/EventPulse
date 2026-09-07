@@ -31,6 +31,10 @@ def main():
     parser.add_argument("--duration", type=float, default=50)
     parser.add_argument("--policy", default="none", choices=["none", "naive", "adaptive"])
     parser.add_argument("--endpoint-id", default="test1")
+    parser.add_argument("--worker-concurrency", type=int, default=20,
+                         help="worker's max concurrent delivery attempts -- match this to "
+                              "--max-concurrency/--recovered-max-concurrency to remove worker-side "
+                              "overshoot as a variable and isolate the receiver's own capacity ceiling")
     parser.add_argument("--chaos", action="store_true", help="enable fault injection (default: pure volume, no fault)")
     parser.add_argument("--steady", type=float, default=15.0, help="seconds of healthy baseline before the fault")
     parser.add_argument("--fault", type=float, default=40.0, help="seconds the fault stays active")
@@ -50,6 +54,7 @@ def main():
         "duration": args.duration,
         "policy": args.policy,
         "endpoint_id": args.endpoint_id,
+        "worker_concurrency": args.worker_concurrency,
         "chaos": {
             "enabled": args.chaos,
             "steady": args.steady,
@@ -85,12 +90,12 @@ def main():
             status = status_resp.json()
             print(f"[cli] status={status['status']} progress={status['progress']} "
                   f"chaos_phase={status.get('chaos_phase')}")
-            if status["status"] in ("done", "failed"):
+            if status["status"] in ("done", "failed", "cancelled"):
                 break
             time.sleep(args.poll_interval)
 
-        if status["status"] == "failed":
-            print(f"[cli] FAILED: {status.get('error')}", file=sys.stderr)
+        if status["status"] in ("failed", "cancelled"):
+            print(f"[cli] {status['status'].upper()}: {status.get('error')}", file=sys.stderr)
             sys.exit(1)
 
         chart_resp = client.get(f"{args.harness_url}/test/result/{run_id}/chart.png")

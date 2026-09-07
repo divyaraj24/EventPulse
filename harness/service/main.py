@@ -92,7 +92,7 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
 
     try:
         run.status = RunStatus.STARTING
-        await docker_control.restart_core(run.policy)
+        await docker_control.restart_core(run.policy, run.worker_concurrency)
 
         run.status = RunStatus.RUNNING
 
@@ -181,6 +181,7 @@ async def start_test(req: TestStartRequest):
         duration=req.duration,
         policy=req.policy,
         endpoint_id=req.endpoint_id,
+        worker_concurrency=req.worker_concurrency,
         started_at=datetime.now(timezone.utc),
     )
     if not registry.try_start(run):

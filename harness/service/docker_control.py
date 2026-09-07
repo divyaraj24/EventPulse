@@ -23,11 +23,11 @@ async def _run(cmd: list[str], extra_env: dict | None = None) -> None:
         raise RuntimeError(f"{' '.join(cmd)} failed:\n{out.decode()}")
 
 
-async def restart_core(policy: str) -> None:
+async def restart_core(policy: str, worker_concurrency: int) -> None:
     await _run(["docker", "compose", "-f", CORE_COMPOSE_FILE, "down", "-v"])
     await _run(
         ["docker", "compose", "-f", CORE_COMPOSE_FILE, "up", "--build", "-d", "--wait"],
-        extra_env={"RETRY_POLICY": policy},
+        extra_env={"RETRY_POLICY": policy, "WORKER_CONCURRENCY": str(worker_concurrency)},
     )
 
 
