@@ -14,8 +14,12 @@ const resultPanel = document.getElementById("result-panel");
 const chartImg = document.getElementById("chart-img");
 
 const durationInput = document.getElementById("duration");
+const rateInput = document.getElementById("rate");
+const workerConcurrencyInput = document.getElementById("worker-concurrency");
 const chaosTimelineInputs = ["steady", "fault", "recovery"].map((id) => document.getElementById(id));
 const chaosTotalHint = document.getElementById("chaos-total-hint");
+const faultRhoHint = document.getElementById("fault-rho-hint");
+const recoveryRhoHint = document.getElementById("recovery-rho-hint");
 
 const cancelBtn = document.getElementById("cancel-btn");
 const historyTable = document.getElementById("history-table");
@@ -30,6 +34,7 @@ let pollHandle = null;
 chaosCheckbox.addEventListener("change", () => {
   chaosFields.hidden = !chaosCheckbox.checked;
   updateChaosTotalHint();
+  updateRhoHints();
 });
 
 function updateChaosTotalHint() {
@@ -50,6 +55,55 @@ function updateChaosTotalHint() {
 
 durationInput.addEventListener("input", updateChaosTotalHint);
 chaosTimelineInputs.forEach((el) => el.addEventListener("input", updateChaosTotalHint));
+
+// rho = offered rate / sustainable service rate (mu = min(worker's own
+// concurrency, receiver's max concurrency) / service time). Empirically
+// derived this session: worker's own semaphore only produces delay/backlog
+// (no real rejections, since httpx's timeout only covers the network call,
+// not time spent waiting for a slot), while the receiver's own ceiling
+// produces real 503s the instant demand exceeds it. Whichever is smaller
+// determines both the number AND the failure mode.
+function computeRho(rate, maxConcurrency, latencyMs, workerConcurrency) {
+  const effectiveConcurrency = Math.min(maxConcurrency, workerConcurrency);
+  if (latencyMs <= 0 || effectiveConcurrency <= 0) {
+    return { rho: 0, mu: Infinity, bindingSide: null };
+  }
+  const mu = effectiveConcurrency / (latencyMs / 1000);
+  return { rho: rate / mu, mu, bindingSide: workerConcurrency < maxConcurrency ? "worker" : "receiver" };
+}
+
+function describeRho(hintEl, phaseLabel, maxConcurrencyId, latencyMsId) {
+  const rate = parseFloat(rateInput.value) || 0;
+  const workerConcurrency = parseFloat(workerConcurrencyInput.value) || 0;
+  const maxConcurrency = parseFloat(document.getElementById(maxConcurrencyId).value) || 0;
+  const latencyMs = parseFloat(document.getElementById(latencyMsId).value) || 0;
+
+  if (latencyMs <= 0) {
+    hintEl.textContent = `${phaseLabel}: latency is 0ms, so the concurrency ceiling never binds ` +
+      `(a slot frees instantly) -- this phase won't create real backpressure regardless of max concurrency.`;
+    hintEl.classList.add("warn-note");
+    return;
+  }
+
+  const { rho, mu, bindingSide } = computeRho(rate, maxConcurrency, latencyMs, workerConcurrency);
+  const capacityNote = bindingSide === "worker"
+    ? `worker's own concurrency (${workerConcurrency}) is the binding constraint, not the receiver's -- this produces delay/backlog, not real rejections`
+    : `the receiver's max concurrency (${maxConcurrency}) is the binding constraint -- excess demand gets rejected (503), not queued`;
+
+  hintEl.textContent = `${phaseLabel}: ρ = ${rho.toFixed(2)} (capacity ${mu.toFixed(1)} ev/s vs ${rate} ev/s offered) -- ` +
+    `${rho >= 1 ? "genuine overload" : "comfortably under capacity"}; ${capacityNote}.`;
+  hintEl.classList.toggle("warn-note", rho >= 1);
+}
+
+function updateRhoHints() {
+  if (!chaosCheckbox.checked) return;
+  describeRho(faultRhoHint, "Fault", "max-concurrency", "latency-ms");
+  describeRho(recoveryRhoHint, "Recovery", "recovered-max-concurrency", "recovered-latency-ms");
+}
+
+[rateInput, workerConcurrencyInput, "max-concurrency", "latency-ms", "recovered-max-concurrency", "recovered-latency-ms"]
+  .map((x) => (typeof x === "string" ? document.getElementById(x) : x))
+  .forEach((el) => el.addEventListener("input", updateRhoHints));
 
 function num(id) {
   return parseFloat(document.getElementById(id).value);

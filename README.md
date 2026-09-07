@@ -65,7 +65,7 @@ docker compose -f harness/docker-compose.yml up -d --build --wait
 for policy in none naive adaptive; do
   python3 harness/main.py ${policy}_hardfault --policy "$policy" --rate 15 --duration 180 \
     --chaos --steady 15 --fault 90 --recovery 60 --max-concurrency 1 --latency-ms 300 \
-    --recovered-max-concurrency 2
+    --recovered-max-concurrency 2 --recovered-latency-ms 200
 done
 ```
 

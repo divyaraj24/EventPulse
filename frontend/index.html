@@ -42,7 +42,7 @@
           </div>
           <div class="field">
             <label for="worker-concurrency">Worker concurrency</label>
-            <input type="number" id="worker-concurrency" value="20" min="1">
+            <input type="number" id="worker-concurrency" value="1000" min="1">
           </div>
         </div>
         <p class="muted-note">Match this to the fault's max concurrency to remove worker-side overshoot as a variable and isolate the receiver's own capacity ceiling.</p>
@@ -84,9 +84,10 @@
               </div>
               <div class="field">
                 <label for="latency-ms">Latency (ms)</label>
-                <input type="number" id="latency-ms" value="0" min="0">
+                <input type="number" id="latency-ms" value="300" min="0">
               </div>
             </div>
+            <p id="fault-rho-hint" class="muted-note"></p>
           </div>
 
           <div class="chaos-group">
@@ -98,9 +99,10 @@
               </div>
               <div class="field">
                 <label for="recovered-latency-ms">Latency (ms)</label>
-                <input type="number" id="recovered-latency-ms" value="200" min="0">
+                <input type="number" id="recovered-latency-ms" value="100" min="0">
               </div>
             </div>
+            <p id="recovery-rho-hint" class="muted-note"></p>
           </div>
         </div>
 

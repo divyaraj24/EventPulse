@@ -81,7 +81,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/eventpulse
       REDIS_URL: redis://redis:6379/0
       RETRY_POLICY: ${RETRY_POLICY:-none}
-      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-20}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1000}
       SIGNING_SECRET: dev-secret-change-me
       PYTHONUNBUFFERED: "1"
     depends_on:

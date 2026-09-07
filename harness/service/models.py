@@ -22,7 +22,13 @@ class TestStartRequest(BaseModel):
     duration: float
     policy: str = "none"
     endpoint_id: str = "test1"
-    worker_concurrency: int = 20
+    # Non-binding by default (matches receiver_mock's own healthy-state
+    # default of 1000) so the receiver's own max_concurrency is the sole
+    # definition of service capacity, matching RetryGuard's two-tier model
+    # (Service A does the retrying, Service B has capacity mu -- Service A
+    # has no throughput cap of its own). Set this lower only to deliberately
+    # study worker-side overshoot as its own variable.
+    worker_concurrency: int = 1000
     chaos: ChaosConfig = ChaosConfig()
 
 
