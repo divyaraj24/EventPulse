@@ -4,6 +4,7 @@ const chaosCheckbox = document.getElementById("chaos-enabled");
 const chaosFields = document.getElementById("chaos-fields");
 
 const statusPanel = document.getElementById("status-panel");
+const statusDot = document.getElementById("status-dot");
 const statusBadge = document.getElementById("status-badge");
 const statusDetail = document.getElementById("status-detail");
 const progressFill = document.getElementById("progress-fill");
@@ -12,18 +13,43 @@ const errorBox = document.getElementById("error-box");
 const resultPanel = document.getElementById("result-panel");
 const chartImg = document.getElementById("chart-img");
 
+const durationInput = document.getElementById("duration");
+const chaosTimelineInputs = ["steady", "fault", "recovery"].map((id) => document.getElementById(id));
+const chaosTotalHint = document.getElementById("chaos-total-hint");
+
 const cancelBtn = document.getElementById("cancel-btn");
 const historyTable = document.getElementById("history-table");
 const historyBody = document.getElementById("history-body");
 const historyEmpty = document.getElementById("history-empty");
 
 const TERMINAL_STATUSES = new Set(["done", "failed", "cancelled"]);
+const ACTIVE_STATUSES = new Set(["starting", "running", "draining", "extracting"]);
 
 let pollHandle = null;
 
 chaosCheckbox.addEventListener("change", () => {
   chaosFields.hidden = !chaosCheckbox.checked;
+  updateChaosTotalHint();
 });
+
+function updateChaosTotalHint() {
+  if (!chaosCheckbox.checked) return;
+  const total = chaosTimelineInputs.reduce((sum, el) => sum + (parseFloat(el.value) || 0), 0);
+  const duration = parseFloat(durationInput.value) || 0;
+  if (duration < total) {
+    chaosTotalHint.textContent =
+      `Timeline totals ${total}s, but duration is only ${duration}s -- the run waits for ` +
+      `both load generation and the full fault timeline, so it'll keep going ${(total - duration).toFixed(0)}s ` +
+      `past 100% events with no new data, and recovery-phase behavior won't be captured.`;
+    chaosTotalHint.classList.add("warn-note");
+  } else {
+    chaosTotalHint.textContent = `Timeline totals ${total}s (duration ${duration}s covers it).`;
+    chaosTotalHint.classList.remove("warn-note");
+  }
+}
+
+durationInput.addEventListener("input", updateChaosTotalHint);
+chaosTimelineInputs.forEach((el) => el.addEventListener("input", updateChaosTotalHint));
 
 function num(id) {
   return parseFloat(document.getElementById(id).value);
@@ -33,6 +59,7 @@ function setStatus(status, detail) {
   statusBadge.textContent = status;
   statusBadge.className = "badge badge-" + status;
   statusDetail.textContent = detail || "";
+  statusDot.className = "status-dot dot-" + status + (ACTIVE_STATUSES.has(status) ? " dot-pulse" : "");
 }
 
 function stopPolling() {
@@ -130,6 +157,7 @@ form.addEventListener("submit", async (e) => {
     rate: num("rate"),
     duration: num("duration"),
     policy: document.getElementById("policy").value,
+    worker_concurrency: parseInt(document.getElementById("worker-concurrency").value, 10),
     chaos: {
       enabled: chaosCheckbox.checked,
       steady: num("steady"),
