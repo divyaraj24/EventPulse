@@ -78,12 +78,11 @@ All numbers below are reproducible, not pre-committed data to take on faith. Clo
 docker compose -f harness/docker-compose.yml up -d --build --wait
 for policy in none naive adaptive; do
   python3 harness/main.py ${policy}_hardfault --policy "$policy" --rate 15 --duration 180 \
-    --chaos --steady 15 --fault 90 --recovery 60 --max-concurrency 1 --latency-ms 300 \
-    --recovered-max-concurrency 2 --recovered-latency-ms 200
+    --chaos --steady 15 --fault 90 --recovery 60 --max-concurrency 1 --latency-ms 300
 done
 ```
 
-Same offered load and the same 90-second fault (deliberately throttled recovery capacity) across all three conditions; only the retry policy differs:
+Same offered load and the same 90-second fault across all three conditions; only the retry policy differs. Recovery isn't separately configured — once the fault clears, the receiver just reverts to its own fixed background operating point (a real, finite capacity representative of normal operation, not an idealized instant reset):
 
 ![Combined comparison chart](results/charts/combined_hardfault.png)
 
