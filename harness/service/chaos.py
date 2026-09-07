@@ -80,8 +80,15 @@ async def run(
         await asyncio.sleep(recovery)
 
         timeline["observation_end"] = datetime.now(timezone.utc).isoformat()
-        # Deliberately not resetting here either -- whatever calls this
-        # tears the stack down afterward anyway.
+        # Deliberately not resetting here either. This used to be justified
+        # as "whatever calls this tears the stack down afterward anyway" --
+        # true for the core stack, but receiver_mock is part of the
+        # persistent harness stack, not torn down per run, so that reasoning
+        # was actually wrong (a chaos-enabled run would leave the receiver
+        # degraded for whatever ran next, chaos-enabled or not). It's safe
+        # now because execute_run() (harness/service/main.py) unconditionally
+        # resets the receiver at the START of every run, chaos or not --
+        # this function no longer needs to guarantee a clean state on exit.
 
     if timeline_output:
         with open(timeline_output, "w") as f:

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import httpx
 import redis.asyncio as aioredis
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -41,6 +42,7 @@ ANALYZE_PY = PROJECT_DIR / "harness" / "analyze.py"
 FRONTEND_DIR = PROJECT_DIR / "frontend"
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 API_URL = os.getenv("API_URL", "http://api:8000")
+RECEIVER_URL = os.getenv("RECEIVER_URL", "http://receiver_mock:9000")
 DRAIN_TIMEOUT_SECONDS = float(os.getenv("DRAIN_TIMEOUT_SECONDS", "180"))
 
 app = FastAPI(title="EventPulse Harness Service")
@@ -92,6 +94,15 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
 
     try:
         run.status = RunStatus.STARTING
+        # receiver_mock is part of the persistent harness stack, not the
+        # core stack torn down per run -- its /admin/chaos state otherwise
+        # leaks forward from whatever the previous run last set. chaos.py's
+        # own /admin/reset only runs when THIS run enables chaos, so a
+        # no-chaos run right after a chaos-enabled one would silently
+        # inherit a degraded receiver. Found via an empty "stability check"
+        # run that came back with a 31.9% rejection rate.
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await chaos_module.call_admin(client, RECEIVER_URL, "/admin/reset")
         await docker_control.restart_core(run.policy, run.worker_concurrency)
 
         run.status = RunStatus.RUNNING
@@ -107,14 +118,14 @@ async def execute_run(run: TestRun, chaos_config: ChaosConfig) -> None:
             duration=run.duration,
             api_url=API_URL,
             endpoint_id=run.endpoint_id,
-            endpoint_url="http://receiver_mock:9000/webhook",
+            endpoint_url=f"{RECEIVER_URL}/webhook",
             output_path=str(ingest_csv),
             on_progress=on_progress,
         )
 
         if chaos_config.enabled:
             chaos_task = chaos_module.run(
-                receiver_url="http://receiver_mock:9000",
+                receiver_url=RECEIVER_URL,
                 steady=chaos_config.steady,
                 fault=chaos_config.fault,
                 recovery=chaos_config.recovery,
