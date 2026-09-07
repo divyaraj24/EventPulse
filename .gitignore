@@ -8,3 +8,4 @@ __pycache__/
 results/**/*.csv
 results/**/*.json
 docs/private/
+PROJECT_HISTORY.md
