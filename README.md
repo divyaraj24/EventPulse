@@ -72,31 +72,30 @@ The baseline isn't a fixed number (there's no universal "normal" latency across 
 
 ## Results
 
-All numbers below are reproducible, not pre-committed data to take on faith. Clone the repo and run each condition yourself:
+All numbers below are reproducible, not pre-committed data to take on faith. Clone the repo and run each condition yourself (`--repeats 3` matches RetryGuard's own methodology of 3 trials per condition):
 
 ```bash
 docker compose -f harness/docker-compose.yml up -d --build --wait
 for policy in none naive adaptive; do
   python3 harness/main.py ${policy}_hardfault --policy "$policy" --rate 15 --duration 180 \
-    --chaos --steady 15 --fault 90 --recovery 60 --max-concurrency 1 --latency-ms 300
+    --chaos --steady 15 --fault 90 --recovery 60 --max-concurrency 1 --latency-ms 300 --repeats 3
 done
 ```
 
-Same offered load and the same 90-second fault across all three conditions; only the retry policy differs. Recovery isn't separately configured — once the fault clears, the receiver just reverts to its own fixed background operating point (a real, finite capacity representative of normal operation, not an idealized instant reset):
+Same offered load and the same 90-second fault across all three conditions; only the retry policy differs. Recovery isn't separately configured — once the fault clears, the receiver just reverts to its own fixed background operating point (a real, finite capacity representative of normal operation, not an idealized instant reset). Chart below shows one representative run per condition, closest to that condition's mean recovery time:
 
 ![Combined comparison chart](results/charts/combined_hardfault.png)
 
-| Condition | Delivered | Dead-lettered | Retries fired | Still unresolved (of 2700) |
+| Condition | Delivered | Dead-lettered | Retries fired | Recovery time |
 |---|---|---|---|---|
-| `none` | 1224 (45%) | 1476 (55%) | 0 | 0 |
-| `naive` | 815 (30%) | 423 (16%) | 3231 | **1420** |
-| `adaptive` | 1134 (42%) | 1566 (58%) | 366 | 0 |
+| `none` | 1635 (60.6%) | 1065 (39.4%) | 0 ± 0 | 0.3s ± 0.0s |
+| `naive` | 2545 (94.3%) | 155 (5.7%) | 2700 ± 127 | **16.6s ± 8.0s** |
+| `adaptive` | 1516 (56.1%) | 1184 (43.9%) | 394 ± 144 | 2.6s ± 2.5s |
 
-Naive is the only policy that doesn't even finish processing the offered load. Its retry storm piles messages up faster than the throttled receiver can drain them, leaving over half of everything sent stuck mid-retry when the run ends. Both `none` and `adaptive` fully resolve every event, and adaptive does it while still retrying productively wherever it's actually safe to.
+Mean ± standard deviation across 3 repeats per condition. `naive` delivers the most events (94.3%) — it just pays for that with a recovery time that's both far slower on average and far less predictable than either alternative: its recovery time ranged from 7.5s to 22.8s across otherwise-identical runs, a 3x spread, while `none`'s was identical to the tenth-of-a-second across all 3 runs. That instability is itself part of the finding, not just noise — `naive`'s recovery depends on the chaotic dynamics of its own retry storm, not on anything deterministic. `adaptive` also varies (0.3s–5.3s), but far more tightly, and its *worst* observed case (5.3s) still beats `naive`'s *best* observed case (7.5s). `adaptive` isn't a strict win on every axis — it delivers slightly fewer events than even `none` (56.1% vs 60.6%) — but it does so at roughly 1/7th `naive`'s retry volume (394 vs 2700) while recovering an order of magnitude faster, which is the actual productive-vs-counterproductive-retry tradeoff RetryGuard's own paper argues for, not raw delivery completeness.
 
 ### Limitations
 
-- Results so far are single runs per condition, so run-to-run variance isn't quantified yet.
 - Only one receiver endpoint is exercised. Adaptive tracks state per endpoint, but its behavior across many endpoints of differing health hasn't been tested.
 - The fault tested here is a capacity ceiling combined with injected latency. Other shapes, like high random rejection rates or partial outages, aren't covered by the benchmark yet.
 
